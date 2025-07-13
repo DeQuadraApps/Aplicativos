@@ -1,0 +1,36 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "quadravendas-e3c62",
+          "appId": "1:564160382938:android:2bbb60e140f1b658fe22e3",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "quadravendas-e3c62",
+          "configurations": {
+            "android": "1:564160382938:android:2bbb60e140f1b658fe22e3",
+            "web": "1:564160382938:web:a894b5ae225fdf96fe22e3"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+Acesse agora o seu terminal de vendas!

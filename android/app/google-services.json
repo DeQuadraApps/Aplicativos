@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "564160382938",
+    "project_id": "quadravendas-e3c62",
+    "storage_bucket": "quadravendas-e3c62.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:564160382938:android:2bbb60e140f1b658fe22e3",
+        "android_client_info": {
+          "package_name": "com.example.quadra_vendas"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCb8BGNhQ1inWxS2NLpL21U3SiX7jAGPGk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
