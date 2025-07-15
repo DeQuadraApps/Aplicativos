@@ -108,7 +108,7 @@ class _SignUpPageState extends State<SignUpPage> {
                 const SizedBox(height: 16),
                 TextFormField(controller: _cpfController, decoration: const InputDecoration(labelText: "CPF"), keyboardType: TextInputType.number, inputFormatters: [_cpfMask], validator: (value) => value == null || value.length < 14 ? 'CPF inválido' : null),
                 const SizedBox(height: 16),
-                TextFormField(controller: _birthDateController, decoration: const InputDecoration(labelText: "Data de Aniversário", suffixIcon: Icon(Icons.calendar_today)), readOnly: true, onTap: () => _selectDate(context), validator: (value) => value == null || value.isEmpty ? 'Campo obrigatório' : null),
+                TextFormField(controller: _birthDateController, decoration: const InputDecoration(labelText: "Data de Nascimento", suffixIcon: Icon(Icons.calendar_today)), readOnly: true, onTap: () => _selectDate(context), validator: (value) => value == null || value.isEmpty ? 'Campo obrigatório' : null),
                 const SizedBox(height: 16),
                 CustomInputField(controller: _emailController, labelText: "E-mail", keyboardType: TextInputType.emailAddress, validator: (value) => value == null || !value.contains('@') ? 'E-mail inválido' : null),
                 const SizedBox(height: 16),

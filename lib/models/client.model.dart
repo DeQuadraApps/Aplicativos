@@ -9,11 +9,12 @@ class Client {
   final String? stateRegistration; // Inscrição Estadual (opcional)
   final String address;
   final String city;
+  final String district;
+  final String houseNumber;
   final String phone;
-  final String email;
+  final String? email;
   final String paymentMethod;
   final String contactName; // Nome Completo do Contato
-  final DateTime? birthDate; // Data de Nascimento do Contato
 
   Client({
     this.id,
@@ -22,11 +23,12 @@ class Client {
     this.stateRegistration,
     required this.address,
     required this.city,
+    required this.district,
+    required this.houseNumber,
     required this.phone,
-    required this.email,
+    this.email,
     required this.paymentMethod,
     required this.contactName,
-    this.birthDate,
   });
 
   // Converte um Documento do Firestore para um objeto Client
@@ -39,11 +41,12 @@ class Client {
       stateRegistration: data['stateRegistration'],
       address: data['address'] ?? '',
       city: data['city'] ?? '',
+      district: data['district'] ?? '',
+      houseNumber: data['houseNumber'] ?? '',
       phone: data['phone'] ?? '',
       email: data['email'] ?? '',
       paymentMethod: data['paymentMethod'] ?? '',
       contactName: data['contactName'] ?? '',
-      birthDate: (data['birthDate'] as Timestamp?)?.toDate(),
     );
   }
 
@@ -55,11 +58,12 @@ class Client {
       'stateRegistration': stateRegistration,
       'address': address,
       'city': city,
+      'district': district,
+      'houseNumber': houseNumber,
       'phone': phone,
       'email': email,
       'paymentMethod': paymentMethod,
       'contactName': contactName,
-      'birthDate': birthDate != null ? Timestamp.fromDate(birthDate!) : null,
     };
   }
 }

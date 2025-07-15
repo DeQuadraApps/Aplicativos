@@ -26,12 +26,12 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
   final _stateRegistrationCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
+  final _districtCtrl = TextEditingController();
+  final _houseNumberCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _paymentMethodCtrl = TextEditingController();
   final _contactNameCtrl = TextEditingController();
-  final _birthDateCtrl = TextEditingController();
-  DateTime? _selectedBirthDate;
 
   final _cnpjMask = MaskTextInputFormatter(mask: '##.###.###/####-##');
   final _phoneMask = MaskTextInputFormatter(mask: '(##) #####-####');
@@ -48,14 +48,14 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
       _stateRegistrationCtrl.text = widget.client!.stateRegistration ?? '';
       _addressCtrl.text = widget.client!.address;
       _cityCtrl.text = widget.client!.city;
+      _districtCtrl.text = widget.client!.district;
+      _houseNumberCtrl.text = widget.client!.houseNumber;
       _phoneCtrl.text = widget.client!.phone;
-      _emailCtrl.text = widget.client!.email;
+      if (widget.client?.email != null) {
+        _emailCtrl.text = widget.client!.email!;
+      }
       _paymentMethodCtrl.text = widget.client!.paymentMethod;
       _contactNameCtrl.text = widget.client!.contactName;
-      if (widget.client!.birthDate != null) {
-        _selectedBirthDate = widget.client!.birthDate;
-        _birthDateCtrl.text = DateFormat('dd/MM/yyyy').format(_selectedBirthDate!);
-      }
     }
   }
 
@@ -67,11 +67,12 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
     _stateRegistrationCtrl.dispose();
     _addressCtrl.dispose();
     _cityCtrl.dispose();
+    _districtCtrl.dispose();
+    _houseNumberCtrl.dispose();
     _phoneCtrl.dispose();
     _emailCtrl.dispose();
     _paymentMethodCtrl.dispose();
     _contactNameCtrl.dispose();
-    _birthDateCtrl.dispose();
     super.dispose();
   }
 
@@ -88,11 +89,12 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
       stateRegistration: _stateRegistrationCtrl.text.trim(),
       address: _addressCtrl.text.trim(),
       city: _cityCtrl.text.trim(),
+      district: _districtCtrl.text.trim(),
+      houseNumber: _houseNumberCtrl.text.trim(),
       phone: _phoneCtrl.text.trim(),
       email: _emailCtrl.text.trim(),
       paymentMethod: _paymentMethodCtrl.text.trim(),
       contactName: _contactNameCtrl.text.trim(),
-      birthDate: _selectedBirthDate,
     );
 
     try {
@@ -105,8 +107,8 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
         clientToSave = Client(
           id: widget.client?.id,
           companyName: clientToSave.companyName, cnpj: clientToSave.cnpj, stateRegistration: clientToSave.stateRegistration,
-          address: clientToSave.address, city: clientToSave.city, phone: clientToSave.phone, email: clientToSave.email,
-          paymentMethod: clientToSave.paymentMethod, contactName: clientToSave.contactName, birthDate: clientToSave.birthDate,
+          address: clientToSave.address, city: clientToSave.city, district: clientToSave.district, houseNumber: clientToSave.houseNumber, phone: clientToSave.phone, email: clientToSave.email,
+          paymentMethod: clientToSave.paymentMethod, contactName: clientToSave.contactName
         );
       } else {
         if (clientToSave.id != null) {
@@ -181,10 +183,30 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
             TextFormField(controller: _cnpjCtrl, decoration: const InputDecoration(labelText: 'CNPJ'), inputFormatters: [_cnpjMask], validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null),
             const SizedBox(height: 16),
             TextFormField(controller: _stateRegistrationCtrl, decoration: const InputDecoration(labelText: 'Inscrição Estadual (Opcional)')),
-            const SizedBox(height: 16),
-            TextFormField(controller: _addressCtrl, decoration: const InputDecoration(labelText: 'Endereço'), validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null),
-            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24.0),
+              child: Row(
+                children: [
+                  const Expanded(child: Divider()),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    child: Text(
+                      'Endereço',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  const Expanded(child: Divider()),
+                ],
+              ),
+            ),
+
             TextFormField(controller: _cityCtrl, decoration: const InputDecoration(labelText: 'Cidade'), validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null),
+            const SizedBox(height: 16),
+            TextFormField(controller: _districtCtrl, decoration: const InputDecoration(labelText: 'Bairro'), validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null),
+            const SizedBox(height: 16),
+            TextFormField(controller: _addressCtrl, decoration: const InputDecoration(labelText: 'Rua / Avenida'), validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null),
+            const SizedBox(height: 16),
+            TextFormField(controller: _houseNumberCtrl, decoration: const InputDecoration(labelText: 'Número'), keyboardType: TextInputType.number, validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null),
           ],
         ),
       ),
@@ -202,26 +224,12 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
             const SizedBox(height: 16),
             TextFormField(controller: _phoneCtrl, decoration: const InputDecoration(labelText: 'Telefone'), inputFormatters: [_phoneMask], validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null),
             const SizedBox(height: 16),
-            TextFormField(controller: _emailCtrl, decoration: const InputDecoration(labelText: 'Email'), keyboardType: TextInputType.emailAddress, validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null),
+            TextFormField(controller: _emailCtrl, decoration: const InputDecoration(labelText: 'Email (Opcional)'), keyboardType: TextInputType.emailAddress),
             const SizedBox(height: 16),
             TextFormField(controller: _paymentMethodCtrl, decoration: const InputDecoration(labelText: 'Forma de Pagamento Padrão'), validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null),
             const SizedBox(height: 16),
             TextFormField(controller: _contactNameCtrl, decoration: const InputDecoration(labelText: 'Nome Completo (Contato)'), validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: _birthDateCtrl,
-              decoration: const InputDecoration(labelText: 'Data de Nascimento (Contato)', suffixIcon: Icon(Icons.calendar_today)),
-              readOnly: true,
-              onTap: () async {
-                final date = await showDatePicker(context: context, initialDate: _selectedBirthDate ?? DateTime.now(), firstDate: DateTime(1900), lastDate: DateTime.now());
-                if (date != null) {
-                  setState(() {
-                    _selectedBirthDate = date;
-                    _birthDateCtrl.text = DateFormat('dd/MM/yyyy').format(date);
-                  });
-                }
-              },
-            ),
           ],
         ),
       ),

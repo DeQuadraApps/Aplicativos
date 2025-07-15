@@ -126,7 +126,7 @@ class _HomePageContentState extends State<_HomePageContent> {
   }
 
   void _startMainTour() {
-    ShowCaseWidget.of(context).startShowCase([_keyMenu, _keyDashboard]);
+    ShowCaseWidget.of(context).startShowCase([_keyDashboard, _keyMenu]);
   }
 
   void _startDrawerTour() {
