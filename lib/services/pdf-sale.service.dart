@@ -72,6 +72,10 @@ class PdfSaleService {
         pw.Text(client?.companyName ?? sale.clientName),
         if (client != null) ...[
           pw.Text('CNPJ: ${client.cnpj}'),
+          pw.Text('Cidade: ${client.city}'),
+          pw.Text('Bairro: ${client.district}'),
+          pw.Text('Rua/Avenida: ${client.address}'),
+          pw.Text('Número: ${client.houseNumber}'),
           pw.Text('Email: ${client.email}'),
           pw.Text('Telefone: ${client.phone}'),
         ]
@@ -97,7 +101,7 @@ class PdfSaleService {
       return [
         productName,
         item.quantity.toString(),
-        currencyFormatter.format(item.product.salePrice),
+        currencyFormatter.format(item.unitPrice),
         currencyFormatter.format(item.totalPrice),
       ];
     }).toList();

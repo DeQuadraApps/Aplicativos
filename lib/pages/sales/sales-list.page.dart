@@ -28,6 +28,41 @@ class _SalesListPageState extends State<SalesListPage> {
     _fetchInstitutionId();
   }
 
+  void _deleteSale(String saleId) {
+    if (_institutionId == null) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmar Exclusão'),
+        content: const Text('Tem certeza que deseja excluir esta venda? Esta ação não pode ser desfeita.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () async {
+              try {
+                await FirebaseFirestore.instance
+                    .collection('institutions').doc(_institutionId)
+                    .collection('sales').doc(saleId)
+                    .delete();
+                if (mounted) {
+                  Navigator.pop(context);
+                  AppSnackBar.showSuccess(context, message: 'Venda excluída com sucesso.');
+                }
+              } catch (e) {
+                if (mounted) {
+                  AppSnackBar.showError(context, message: 'Erro ao excluir venda.');
+                }
+              }
+            },
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+  }
+
+
   Future<void> _fetchInstitutionId() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -151,12 +186,18 @@ class _SalesListPageState extends State<SalesListPage> {
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           TextButton.icon(
+                            icon: const Icon(Icons.delete_forever, size: 20, color: Colors.red),
+                            label: const Text('Excluir'),
+                            onPressed: () => _deleteSale(sale.id!),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton.icon(
                             icon: const Icon(Icons.picture_as_pdf_outlined),
                             label: const Text('Ver PDF'),
                             onPressed: () => _showPdfPreview(sale),
                           ),
                           const SizedBox(width: 8),
-                          ElevatedButton.icon(
+                          TextButton.icon(
                             icon: const Icon(Icons.share, size: 18),
                             label: const Text('Partilhar'),
                             onPressed: () => _shareSale(sale),

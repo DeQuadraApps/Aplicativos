@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
@@ -51,6 +52,49 @@ class _NewSalePageState extends State<NewSalePage> {
     _observationsController.dispose();
     _paymentMethodController.dispose();
     super.dispose();
+  }
+
+  Future<void> _showEditPriceDialog(SaleItem item) async {
+    final priceController = TextEditingController(text: item.unitPrice.toStringAsFixed(2));
+    final formKey = GlobalKey<FormState>();
+
+    final newPrice = await showDialog<double>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Editar Preço de ${item.product.name}'),
+        content: Form(
+          key: formKey,
+          child: TextFormField(
+            controller: priceController,
+            decoration: const InputDecoration(labelText: 'Novo Preço Unitário', prefixText: 'R\$ '),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            validator: (value) {
+              if (value == null || value.isEmpty) return 'Campo obrigatório';
+              if (double.tryParse(value.replaceAll(',', '.')) == null) return 'Valor inválido';
+              return null;
+            },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                final price = double.parse(priceController.text.replaceAll(',', '.'));
+                Navigator.pop(context, price);
+              }
+            },
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+
+    if (newPrice != null) {
+      setState(() {
+        item.unitPrice = newPrice;
+      });
+    }
   }
 
   Future<void> _loadInitialData() async {
@@ -214,6 +258,42 @@ class _NewSalePageState extends State<NewSalePage> {
     }
   }
 
+  Future<void> _showEditQuantityDialog(SaleItem item) async {
+    final quantityController = TextEditingController(text: item.quantity.toString());
+
+    final newQuantity = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Alterar Quantidade'),
+        content: TextFormField(
+          controller: quantityController,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Nova Quantidade'),
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () {
+              final quantity = int.tryParse(quantityController.text);
+              if (quantity != null && quantity > 0) {
+                Navigator.pop(context, quantity);
+              } else {
+                // Se o utilizador digitar 0 ou um valor inválido, removemos o item.
+                Navigator.pop(context, 0);
+              }
+            },
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+
+    if (newQuantity != null) {
+      _updateQuantity(item, newQuantity);
+    }
+  }
   @override
   Widget build(BuildContext context) {
     final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
@@ -228,7 +308,7 @@ class _NewSalePageState extends State<NewSalePage> {
             : Stepper(
           controlsBuilder: (context, details) {
             return Padding(
-              padding: const EdgeInsets.only(top: 16.0),
+              padding: const EdgeInsets.only(top: 40.0),
               child: Row(
                 children: <Widget>[
                   ElevatedButton(
@@ -384,14 +464,36 @@ class _NewSalePageState extends State<NewSalePage> {
                 final item = _cart[index];
                 return ListTile(
                   title: Text(item.product.name),
-                  subtitle: Text(currencyFormatter.format(item.totalPrice)),
+                  subtitle: InkWell(
+                    onTap: () => _showEditPriceDialog(item),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4.0),
+                      child: Text(
+                        '${currencyFormatter.format(item.unitPrice)} (Toque para editar)',
+                        style: TextStyle(color: Theme.of(context).colorScheme.primary),
+                      ),
+                    ),
+                  ),
                   trailing: SizedBox(
-                    width: 120,
-                    child: Row(children: [
-                      IconButton(icon: const Icon(Icons.remove), onPressed: () => _updateQuantity(item, item.quantity - 1)),
-                      Text(item.quantity.toString()),
-                      IconButton(icon: const Icon(Icons.add), onPressed: () => _updateQuantity(item, item.quantity + 1)),
-                    ]),
+                    width: 180,
+                    child: Expanded(
+                      child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                        IconButton(icon: const Icon(Icons.remove), onPressed: () => _updateQuantity(item, item.quantity - 1)),
+                        InkWell(
+                          onTap: () => _showEditQuantityDialog(item),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                            child: Text(
+                              item.quantity.toString(),
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                        IconButton(icon: const Icon(Icons.add), onPressed: () => _updateQuantity(item, item.quantity + 1)),
+                      ]),
+                    ),
                   ),
                 );
               }

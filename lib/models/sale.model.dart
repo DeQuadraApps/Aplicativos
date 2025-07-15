@@ -7,12 +7,31 @@ import 'package:quadra_vendas/models/product.model.dart';
 class SaleItem {
   final Product product;
   int quantity;
-  SaleItem({required this.product, this.quantity = 1});
-  double get totalPrice => product.salePrice * quantity;
-  Map<String, dynamic> toMap() => {'productId': product.id, 'productName': product.name, 'quantity': quantity, 'unitPrice': product.salePrice, 'totalPrice': totalPrice};
+
+  double unitPrice;
+
+  SaleItem({required this.product, this.quantity = 1})
+      : unitPrice = product.salePrice;
+
+  double get totalPrice => unitPrice * quantity;
+  Map<String, dynamic> toMap() => {'productId': product.id, 'productName': product.name, 'quantity': quantity, 'unitPrice': unitPrice, 'totalPrice': totalPrice};
   factory SaleItem.fromMap(Map<String, dynamic> map) {
-    final tempProduct = Product(id: map['productId'], name: map['productName'], salePrice: (map['unitPrice'] as num? ?? 0).toDouble(), categoryId: '', categoryName: '');
-    return SaleItem(product: tempProduct, quantity: (map['quantity'] as num? ?? 1).toInt());
+    final tempProduct = Product(
+      id: map['productId'],
+      name: map['productName'],
+      // O preço de venda do produto original não é mais o principal aqui
+      salePrice: (map['unitPrice'] as num? ?? 0).toDouble(),
+      categoryId: '',
+      categoryName: '',
+    );
+    // Criamos o item e, se necessário, ajustamos o preço unitário
+    final saleItem = SaleItem(
+      product: tempProduct,
+      quantity: (map['quantity'] as num? ?? 1).toInt(),
+    );
+    // Garante que o unitPrice do item é o que foi guardado na venda
+    saleItem.unitPrice = (map['unitPrice'] as num? ?? 0).toDouble();
+    return saleItem;
   }
 }
 
