@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import 'package:quadra_vendas/models/client.model.dart';
 import 'package:quadra_vendas/models/sale.model.dart';
+import 'package:quadra_vendas/pages/sales/edit-sale.page.dart';
 import 'package:quadra_vendas/services/pdf-sale.service.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
 import 'package:share_plus/share_plus.dart';
@@ -98,7 +99,7 @@ class _SalesListPageState extends State<SalesListPage> {
     }
 
     // CORREÇÃO: Passando o paymentMethod para o novo objeto Sale
-    final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod);
+    final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod);
     final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName);
     final pdfBytes = await pdfService.generatePdf();
     await Printing.layoutPdf(onLayout: (format) async => pdfBytes);
@@ -117,7 +118,7 @@ class _SalesListPageState extends State<SalesListPage> {
 
     try {
       // CORREÇÃO: Passando o paymentMethod para o novo objeto Sale
-      final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod);
+      final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod);
       final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName);
       final pdfBytes = await pdfService.generatePdf();
 
@@ -185,6 +186,21 @@ class _SalesListPageState extends State<SalesListPage> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
+                          TextButton.icon(
+                            icon: const Icon(Icons.edit,
+                                size: 20, color: Colors.blueGrey),
+                            label: const Text('Editar'),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      EditSalePage(sale: sale),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 8),
                           TextButton.icon(
                             icon: const Icon(Icons.delete_forever, size: 20, color: Colors.red),
                             label: const Text('Excluir'),

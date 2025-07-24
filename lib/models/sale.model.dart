@@ -45,6 +45,7 @@ class Sale {
   final double totalAmount;
   final String paymentMethod; // <-- NOVO CAMPO
   final bool withInvoice;
+  final bool newClient;
   final String? observations;
   final DateTime saleDate;
   final String userId;
@@ -58,6 +59,7 @@ class Sale {
     required this.totalAmount,
     required this.paymentMethod, // <-- NOVO CAMPO
     required this.withInvoice,
+    required this.newClient,
     this.observations,
     required this.saleDate,
     required this.userId,
@@ -67,7 +69,8 @@ class Sale {
     return {
       'clientId': client!.id, 'clientName': client!.companyName,
       'totalAmount': totalAmount, 'paymentMethod': paymentMethod, // <-- NOVO CAMPO
-      'withInvoice': withInvoice, 'observations': observations,
+      'withInvoice': withInvoice, 'newClient': newClient,
+      'observations': observations,
       'saleDate': Timestamp.fromDate(saleDate), 'userId': userId,
       'items': items.map((item) => item.toMap()).toList(),
     };
@@ -83,6 +86,7 @@ class Sale {
       totalAmount: (data['totalAmount'] as num? ?? 0).toDouble(),
       paymentMethod: data['paymentMethod'] ?? 'Não informada', // <-- NOVO CAMPO
       withInvoice: data['withInvoice'] ?? false,
+      newClient: data['newClient'] ?? false,
       observations: data['observations'],
       saleDate: (data['saleDate'] as Timestamp).toDate(),
       userId: data['userId'] ?? '',

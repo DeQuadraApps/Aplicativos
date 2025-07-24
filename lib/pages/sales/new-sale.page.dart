@@ -34,6 +34,7 @@ class _NewSalePageState extends State<NewSalePage> {
   List<SaleItem> _cart = [];
   final _productSearchController = TextEditingController();
   bool _withInvoice = false;
+  bool _newClient = false;
   final _observationsController = TextEditingController();
   bool _isLoading = true;
   final _paymentMethodController = TextEditingController();
@@ -231,6 +232,7 @@ class _NewSalePageState extends State<NewSalePage> {
       items: _cart,
       totalAmount: total,
       withInvoice: _withInvoice,
+      newClient: _newClient,
       observations: _observationsController.text.trim(),
       saleDate: DateTime.now(),
       userId: FirebaseAuth.instance.currentUser!.uid,
@@ -406,6 +408,11 @@ class _NewSalePageState extends State<NewSalePage> {
           },
           onSelected: (client) => _onClientSelected(client),
         ),
+        SwitchListTile(
+          title: const Text('Cliente novo?'),
+          value: _newClient,
+          onChanged: (val) => setState(() => _newClient = val),
+        ),
         const SizedBox(height: 20),
         TextButton.icon(
           icon: const Icon(Icons.person_add_alt_1),
@@ -476,24 +483,22 @@ class _NewSalePageState extends State<NewSalePage> {
                   ),
                   trailing: SizedBox(
                     width: 180,
-                    child: Expanded(
-                      child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                        IconButton(icon: const Icon(Icons.remove), onPressed: () => _updateQuantity(item, item.quantity - 1)),
-                        InkWell(
-                          onTap: () => _showEditQuantityDialog(item),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                            child: Text(
-                              item.quantity.toString(),
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                            ),
+                    child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                      IconButton(icon: const Icon(Icons.remove), onPressed: () => _updateQuantity(item, item.quantity - 1)),
+                      InkWell(
+                        onTap: () => _showEditQuantityDialog(item),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                          child: Text(
+                            item.quantity.toString(),
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                           ),
                         ),
-                        IconButton(icon: const Icon(Icons.add), onPressed: () => _updateQuantity(item, item.quantity + 1)),
-                      ]),
-                    ),
+                      ),
+                      IconButton(icon: const Icon(Icons.add), onPressed: () => _updateQuantity(item, item.quantity + 1)),
+                    ]),
                   ),
                 );
               }

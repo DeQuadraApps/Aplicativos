@@ -11,6 +11,7 @@ import 'package:quadra_vendas/pages/clients/clients-list.page.dart';
 import 'package:quadra_vendas/pages/dashboard/dashboard.page.dart';
 import 'package:quadra_vendas/pages/info/info.page.dart';
 import 'package:quadra_vendas/pages/product/product-list.page.dart';
+import 'package:quadra_vendas/pages/sales/direct-sale.page.dart';
 import 'package:quadra_vendas/pages/sales/new-sale.page.dart';
 import 'package:quadra_vendas/pages/sales/sales-list.page.dart';
 import 'package:quadra_vendas/pages/settings/settings.page.dart';
@@ -100,6 +101,22 @@ class _HomePageContentState extends State<_HomePageContent> {
         }
       });
     }
+  }
+
+  Future<void> _navigateToSalePage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final mode = prefs.getString('saleMode') ?? 'cart';
+
+    Navigator.pop(context);
+
+    Widget pageToNavigate = (mode == 'direct')
+        ? const DirectSalePage()
+        : const NewSalePage();
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => pageToNavigate),
+    );
   }
 
   Future<void> _promptTourIfNeeded() async {
@@ -338,7 +355,7 @@ class _HomePageContentState extends State<_HomePageContent> {
           Showcase(
             key: _keyNewSale,
             description: 'Use este menu para registar uma nova venda rapidamente.',
-            child: ListTile(leading: const Icon(Icons.point_of_sale_outlined), title: const Text('Registrar Venda'), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const NewSalePage())); }),
+            child: ListTile(leading: const Icon(Icons.point_of_sale_outlined), title: const Text('Registrar Venda'), onTap: _navigateToSalePage),
           ),
           const Divider(),
           Showcase(

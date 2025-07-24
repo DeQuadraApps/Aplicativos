@@ -16,7 +16,6 @@ class PdfSaleService {
     final pdf = pw.Document();
     final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
 
-    // Carregamento das fontes - isto só funciona se o pubspec.yaml estiver correto
     final fontData = await rootBundle.load("assets/fonts/Roboto-Regular.ttf");
     final boldFontData = await rootBundle.load("assets/fonts/Roboto-Bold.ttf");
     final ttf = pw.Font.ttf(fontData);
@@ -35,18 +34,35 @@ class PdfSaleService {
         pageTheme: pageTheme,
         build: (context) => [
           _buildHeader(context),
-          _buildClientInfo(context),
+          // A nova secção de informações do cliente
+          _buildClientSection(context),
           pw.SizedBox(height: 20),
           _buildItemsTable(context, currencyFormatter),
           pw.Divider(),
           _buildTotal(context, currencyFormatter),
           pw.SizedBox(height: 20),
-          _buildFooter(context),
         ],
       ),
     );
 
     return pdf.save();
+  }
+
+  // Função helper para criar uma linha de informação (label: valor)
+  pw.Widget _buildInfoRow(String label, String value) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.SizedBox(
+            width: 80,
+            child: pw.Text(label, style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          ),
+          pw.Expanded(child: pw.Text(value)),
+        ],
+      ),
+    );
   }
 
   pw.Widget _buildHeader(pw.Context context) {
@@ -58,28 +74,82 @@ class PdfSaleService {
         pw.SizedBox(height: 5),
         pw.Text('Data: ${DateFormat('dd/MM/yyyy HH:mm').format(sale.saleDate)}'),
         pw.Divider(thickness: 2),
-        pw.SizedBox(height: 20),
+        pw.SizedBox(height: 10),
       ],
     );
   }
 
-  pw.Widget _buildClientInfo(pw.Context context) {
+  /// =======================================================
+  /// SECÇÃO DE CLIENTE REESTRUTURADA
+  /// =======================================================
+  pw.Widget _buildClientSection(pw.Context context) {
     final client = sale.client;
+
+    // Só mostra os detalhes completos se o objeto client estiver disponível
+    if (client == null) {
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text('CLIENTE:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.Text(sale.clientName),
+        ],
+      );
+    }
+
     return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Text('CLIENTE:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-        pw.Text(client?.companyName ?? sale.clientName),
-        if (client != null) ...[
-          pw.Text('CNPJ: ${client.cnpj}'),
-          pw.Text('Cidade: ${client.city}'),
-          pw.Text('Bairro: ${client.district}'),
-          pw.Text('Rua/Avenida: ${client.address}'),
-          pw.Text('Número: ${client.houseNumber}'),
-          pw.Text('Email: ${client.email}'),
-          pw.Text('Telefone: ${client.phone}'),
-        ]
-      ],
+        pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            // Coluna da Esquerda: Dados do Cliente
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('DADOS DO CLIENTE', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.grey700)),
+                  pw.Divider(),
+                  _buildInfoRow('Nome:', client.companyName),
+                  _buildInfoRow('CNPJ:', client.cnpj),
+                  _buildInfoRow('Telefone:', client.phone),
+                  // =======================================================
+                  // AQUI ESTÁ A CORREÇÃO: Mostra o email apenas se ele existir
+                  // =======================================================
+                  if (client.email != null && client.email!.isNotEmpty)
+                    _buildInfoRow('Email:', client.email!),
+                ],
+              ),
+            ),
+            pw.SizedBox(width: 20),
+            // Coluna da Direita: Endereço
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('ENDEREÇO', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.grey700)),
+                  pw.Divider(),
+                  _buildInfoRow('Cidade:', client.city),
+                  _buildInfoRow('Bairro:', client.district),
+                  _buildInfoRow('Rua/Av.:', client.address),
+                  _buildInfoRow('Número:', client.houseNumber),
+                ],
+              ),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 20),
+        pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text('INFORMAÇÕES ADICIONAIS', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.grey700)),
+            pw.Divider(),
+            _buildInfoRow('Pagamento:', sale.paymentMethod),
+            _buildInfoRow('Emitir NF:', sale.withInvoice ? 'Sim' : 'Não'),
+            _buildInfoRow('Cliente Novo: ', sale.newClient ? 'Sim' : 'Não'),
+            if(sale.observations != null && sale.observations!.isNotEmpty)
+            _buildInfoRow('Observações:', sale.observations!),
+          ]
+        )
+      ]
     );
   }
 
@@ -128,24 +198,6 @@ class PdfSaleService {
         pw.Text('TOTAL: ', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
         pw.Text(currencyFormatter.format(sale.totalAmount), style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16)),
       ],
-    );
-  }
-
-  pw.Widget _buildFooter(pw.Context context) {
-    return pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Text('Forma de Pagamento:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-          pw.Text(sale.paymentMethod),
-          pw.SizedBox(height: 10),
-          pw.Text('Emissão de Nota:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-          pw.Text(sale.withInvoice ? 'Com emissão de nota fiscal.' : 'Sem emissão de nota fiscal.'),
-          pw.SizedBox(height: 10),
-          if(sale.observations != null && sale.observations!.isNotEmpty)
-            pw.Text('Observações:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-          if(sale.observations != null && sale.observations!.isNotEmpty)
-            pw.Text(sale.observations!),
-        ]
     );
   }
 }
