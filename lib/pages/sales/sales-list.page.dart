@@ -63,7 +63,6 @@ class _SalesListPageState extends State<SalesListPage> {
     );
   }
 
-
   Future<void> _fetchInstitutionId() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -81,7 +80,6 @@ class _SalesListPageState extends State<SalesListPage> {
     }
   }
 
-  // Função para buscar os detalhes completos do cliente
   Future<Client?> _fetchFullClient(String clientId) async {
     if (_institutionId == null) return null;
     final clientDoc = await FirebaseFirestore.instance
@@ -90,7 +88,6 @@ class _SalesListPageState extends State<SalesListPage> {
     return clientDoc.exists ? Client.fromFirestore(clientDoc as DocumentSnapshot<Map<String, dynamic>>) : null;
   }
 
-  // Função para mostrar o preview do PDF
   Future<void> _showPdfPreview(Sale sale) async {
     final client = await _fetchFullClient(sale.clientId);
     if(client == null) {
@@ -98,16 +95,12 @@ class _SalesListPageState extends State<SalesListPage> {
       return;
     }
 
-    // CORREÇÃO: Passando o paymentMethod para o novo objeto Sale
     final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod);
     final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName);
     final pdfBytes = await pdfService.generatePdf();
     await Printing.layoutPdf(onLayout: (format) async => pdfBytes);
   }
 
-  /// =======================================================
-  /// FUNÇÃO DE PARTILHA CORRIGIDA
-  /// =======================================================
   Future<void> _shareSale(Sale sale) async {
     AppSnackBar.showInfo(context, message: "A preparar documento para partilha...");
     final client = await _fetchFullClient(sale.clientId);
@@ -117,7 +110,6 @@ class _SalesListPageState extends State<SalesListPage> {
     }
 
     try {
-      // CORREÇÃO: Passando o paymentMethod para o novo objeto Sale
       final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod);
       final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName);
       final pdfBytes = await pdfService.generatePdf();
@@ -133,7 +125,6 @@ class _SalesListPageState extends State<SalesListPage> {
       if(mounted) AppSnackBar.showError(context, message: 'Erro ao partilhar a venda.');
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -166,11 +157,70 @@ class _SalesListPageState extends State<SalesListPage> {
                 margin: const EdgeInsets.symmetric(vertical: 6),
                 child: ExpansionTile(
                   title: Text(sale.clientName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  // CORREÇÃO: Exibindo o método de pagamento no subtítulo
                   subtitle: Text('Data: ${dateFormatter.format(sale.saleDate)} • Pgto: ${sale.paymentMethod}'),
-                  trailing: Text(
-                    currencyFormatter.format(sale.totalAmount),
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        currencyFormatter.format(sale.totalAmount),
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                      const SizedBox(width: 8),
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert),
+                        onSelected: (value) {
+                          switch (value) {
+                            case 'edit':
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => EditSalePage(sale: sale),
+                                ),
+                              );
+                              break;
+                            case 'delete':
+                              _deleteSale(sale.id!);
+                              break;
+                            case 'pdf':
+                              _showPdfPreview(sale);
+                              break;
+                            case 'share':
+                              _shareSale(sale);
+                              break;
+                          }
+                        },
+                        itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                          const PopupMenuItem<String>(
+                            value: 'edit',
+                            child: ListTile(
+                              leading: Icon(Icons.edit),
+                              title: Text('Editar'),
+                            ),
+                          ),
+                          const PopupMenuItem<String>(
+                            value: 'delete',
+                            child: ListTile(
+                              leading: Icon(Icons.delete_forever),
+                              title: Text('Excluir'),
+                            ),
+                          ),
+                          const PopupMenuItem<String>(
+                            value: 'pdf',
+                            child: ListTile(
+                              leading: Icon(Icons.picture_as_pdf_outlined),
+                              title: Text('Ver PDF'),
+                            ),
+                          ),
+                          const PopupMenuItem<String>(
+                            value: 'share',
+                            child: ListTile(
+                              leading: Icon(Icons.share),
+                              title: Text('Partilhar'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                   children: [
                     const Divider(height: 1),
@@ -181,46 +231,6 @@ class _SalesListPageState extends State<SalesListPage> {
                         leading: Text('${item.quantity}x'),
                         trailing: Text(currencyFormatter.format(item.totalPrice)),
                       ),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton.icon(
-                            icon: const Icon(Icons.edit,
-                                size: 20, color: Colors.blueGrey),
-                            label: const Text('Editar'),
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      EditSalePage(sale: sale),
-                                ),
-                              );
-                            },
-                          ),
-                          const SizedBox(width: 8),
-                          TextButton.icon(
-                            icon: const Icon(Icons.delete_forever, size: 20, color: Colors.red),
-                            label: const Text('Excluir'),
-                            onPressed: () => _deleteSale(sale.id!),
-                          ),
-                          const SizedBox(width: 8),
-                          TextButton.icon(
-                            icon: const Icon(Icons.picture_as_pdf_outlined),
-                            label: const Text('Ver PDF'),
-                            onPressed: () => _showPdfPreview(sale),
-                          ),
-                          const SizedBox(width: 8),
-                          TextButton.icon(
-                            icon: const Icon(Icons.share, size: 18),
-                            label: const Text('Partilhar'),
-                            onPressed: () => _shareSale(sale),
-                          ),
-                        ],
-                      ),
-                    ),
                   ],
                 ),
               );
