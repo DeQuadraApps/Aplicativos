@@ -4,10 +4,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:quadra_vendas/enums/category-import-action.enum.dart';
-// Adicione o import para o seu novo enum
-// Boa prática: renomear arquivos com hífen para underscore (ex: product_category_model.dart)
 import 'package:quadra_vendas/models/product-category.model.dart';
 import 'package:quadra_vendas/models/product.model.dart';
+import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/pages/product/add-edit-category.page.dart';
 import 'package:quadra_vendas/pages/product/add-edit-product.page.dart';
 import 'package:quadra_vendas/services/product-import.service.dart';
@@ -22,85 +21,94 @@ class ProductsListPage extends StatefulWidget {
 
 class _ProductsListPageState extends State<ProductsListPage> {
   String? _institutionId;
+  UserModel? _currentUserData;
+  List<ProductCategory> _categories = [];
 
   @override
   void initState() {
     super.initState();
-    _fetchInstitutionId();
+    _fetchUserData();
   }
 
-  Future<void> _fetchInstitutionId() async {
+  Future<void> _fetchUserData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      if(mounted) setState(() => _institutionId = userDoc.data()?['institutionId']);
+      if (mounted) {
+        setState(() {
+          _institutionId = userDoc.data()?['institutionId'];
+          _currentUserData = UserModel.fromFirestore(userDoc);
+        });
+      }
     }
   }
 
-  /// =================================================================
-  /// PASSO 1: CRIAR A FUNÇÃO QUE MOSTRA O DIÁLOGO DE CONFLITO
-  /// =================================================================
-  Future<CategoryImportAction?> _showCategoryConflictDialog(String categoryName) async {
-    return await showDialog<CategoryImportAction>(
+  Future<void> _showCategoryPickerForSalesperson() async {
+    if (_categories.isEmpty) {
+      AppSnackBar.showError(context, message: 'Nenhuma categoria disponível para adicionar produtos.');
+      return;
+    }
+
+    final ProductCategory? selectedCategory = await showDialog<ProductCategory>(
       context: context,
-      barrierDismissible: false, // O utilizador deve escolher uma opção
-      builder: (BuildContext context) {
+      builder: (context) {
         return AlertDialog(
-          title: const Text('Categoria Duplicada'),
-          content: Text('A categoria "$categoryName" já existe. O que deseja fazer?'),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Cancelar Importação'),
-              onPressed: () {
-                Navigator.of(context).pop(CategoryImportAction.cancel);
+          title: const Text('Selecione uma Categoria'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: _categories.length,
+              itemBuilder: (context, index) {
+                return ListTile(
+                  title: Text(_categories[index].name),
+                  onTap: () => Navigator.of(context).pop(_categories[index]),
+                );
               },
             ),
+          ),
+          actions: [
             TextButton(
-              child: const Text('Criar Nova Categoria'),
-              onPressed: () {
-                Navigator.of(context).pop(CategoryImportAction.createNew);
-              },
-            ),
-            ElevatedButton(
-              child: const Text('Substituir'),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              onPressed: () {
-                Navigator.of(context).pop(CategoryImportAction.overwrite);
-              },
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
             ),
           ],
         );
       },
     );
+
+    if (selectedCategory != null && mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AddEditProductPage(
+            institutionId: _institutionId!,
+            category: selectedCategory,
+          ),
+        ),
+      );
+    }
   }
 
-
-  /// =======================================================
-  /// PASSO 2: ATUALIZAR A FUNÇÃO DE IMPORTAÇÃO
-  /// =======================================================
   void _importFromExcel() async {
-    if (_institutionId == null) return;
-
+    if (_institutionId == null || _currentUserData == null || _currentUserData!.role != 'admin') {
+      AppSnackBar.showError(context, message: 'Apenas administradores podem importar produtos.');
+      return;
+    }
     AppSnackBar.showInfo(context, message: 'Processando arquivo...', duration: const Duration(seconds: 15));
-
     final service = ProductImportService(institutionId: _institutionId!);
-    // A chamada ao serviço agora passa a nossa função de diálogo como um parâmetro
     final String? resultMessage = await service.importFromExcel(
       onConflict: _showCategoryConflictDialog,
+      adminId: _currentUserData!.id,
     );
-
     if (mounted) {
       if (resultMessage == null) {
-        // NULO significa que a importação foi um SUCESSO.
         AppSnackBar.showSuccess(context, message: 'Produtos importados com sucesso!');
       } else {
-        // Se houver uma mensagem, ela é um ERRO ou AVISO. Exibimos a mensagem.
         AppSnackBar.showError(context, message: resultMessage, duration: const Duration(seconds: 8));
       }
     }
   }
-
-  // --- O resto do seu código permanece exatamente o mesmo ---
 
   Future<void> _deleteCategoryAndProducts(ProductCategory category) async {
     if (_institutionId == null || category.id == null) return;
@@ -177,32 +185,64 @@ class _ProductsListPageState extends State<ProductsListPage> {
     }
   }
 
+  Future<CategoryImportAction?> _showCategoryConflictDialog(String categoryName) async {
+    return await showDialog<CategoryImportAction>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Categoria Duplicada'),
+          content: Text('A categoria "$categoryName" já existe. O que deseja fazer?'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancelar Importação'),
+              onPressed: () => Navigator.of(context).pop(CategoryImportAction.cancel),
+            ),
+            TextButton(
+              child: const Text('Criar Nova Categoria'),
+              onPressed: () => Navigator.of(context).pop(CategoryImportAction.createNew),
+            ),
+            ElevatedButton(
+              child: const Text('Substituir'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.of(context).pop(CategoryImportAction.overwrite),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+    final bool isAdmin = _currentUserData?.role == 'admin';
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Produtos e Categorias'),
+        title: Text(isAdmin ? 'Produtos da Instituição' : 'Todos os Produtos'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.upload_file),
-            tooltip: 'Importar de Excel',
-            onPressed: _importFromExcel,
-          ),
+          if (isAdmin)
+            IconButton(
+              icon: const Icon(Icons.upload_file),
+              tooltip: 'Importar de Excel',
+              onPressed: _importFromExcel,
+            ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          if (_institutionId != null) {
+          if (_institutionId == null) return;
+          if (isAdmin) {
             Navigator.push(context, MaterialPageRoute(builder: (context) => AddEditCategoryPage(institutionId: _institutionId!)));
+          } else {
+            _showCategoryPickerForSalesperson();
           }
         },
         child: const Icon(Icons.add),
-        tooltip: 'Nova Categoria',
+        tooltip: isAdmin ? 'Nova Categoria' : 'Adicionar Produto Pessoal',
       ),
-      body: _institutionId == null
+      body: _currentUserData == null
           ? const Center(child: CircularProgressIndicator())
           : StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
@@ -210,84 +250,93 @@ class _ProductsListPageState extends State<ProductsListPage> {
             .collection('productCategories').orderBy('name')
             .snapshots(),
         builder: (context, categorySnapshot) {
-          if (categorySnapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          if (categorySnapshot.hasError) return Center(child: Text("Erro ao carregar categorias: ${categorySnapshot.error}"));
+          if (categorySnapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
           if (!categorySnapshot.hasData || categorySnapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Nenhuma categoria encontrada.'));
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Text(
+                  isAdmin
+                      ? 'Nenhuma categoria encontrada. Clique no botão "+" para criar a sua primeira categoria.'
+                      : 'Nenhuma categoria foi criada pela instituição ainda.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
           }
 
-          final categories = categorySnapshot.data!.docs
-              .map((doc) => ProductCategory.fromFirestore(doc as DocumentSnapshot<Map<String, dynamic>>))
-              .toList();
+          _categories = categorySnapshot.data!.docs.map((doc) => ProductCategory.fromFirestore(doc as DocumentSnapshot<Map<String, dynamic>>)).toList();
 
           return ListView.builder(
-            itemCount: categories.length,
+            itemCount: _categories.length,
             itemBuilder: (context, index) {
-              final category = categories[index];
+              final category = _categories[index];
               return ExpansionTile(
                 title: Row(
                   children: [
                     Expanded(child: Text(category.name, style: Theme.of(context).textTheme.titleLarge)),
-                    IconButton(
-                      icon: Icon(Icons.edit_note, color: Theme.of(context).colorScheme.secondary),
-                      tooltip: 'Editar Categoria',
-                      onPressed: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (context) => AddEditCategoryPage(institutionId: _institutionId!, category: category)));
-                      },
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.delete_forever, color: Theme.of(context).colorScheme.error),
-                      tooltip: 'Excluir Categoria e Produtos',
-                      onPressed: () => _deleteCategoryAndProducts(category),
-                    ),
+                    if (isAdmin) ...[
+                      IconButton(
+                        icon: Icon(Icons.edit_note, color: Theme.of(context).colorScheme.secondary),
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => AddEditCategoryPage(institutionId: _institutionId!, category: category))),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.delete_forever, color: Theme.of(context).colorScheme.error),
+                        onPressed: () => _deleteCategoryAndProducts(category),
+                      ),
+                    ]
                   ],
                 ),
                 children: [
                   StreamBuilder<QuerySnapshot>(
+                    // +++ A CONSULTA AGORA É SIMPLES E FUNCIONA PARA TODOS +++
+                    // Ela busca TODOS os produtos da categoria. A lógica de permissão fica na UI.
                     stream: FirebaseFirestore.instance
                         .collection('institutions').doc(_institutionId)
                         .collection('products')
                         .where('categoryId', isEqualTo: category.id)
+                        .orderBy('name')
                         .snapshots(),
                     builder: (context, productSnapshot) {
+                      if (productSnapshot.hasError) {
+                        debugPrint("ERRO AO CARREGAR PRODUTOS: ${productSnapshot.error}");
+                        return Padding(padding: const EdgeInsets.all(16.0), child: Text("Erro ao carregar produtos.", style: TextStyle(color: Colors.red)));
+                      }
                       if (productSnapshot.connectionState == ConnectionState.waiting) return const Padding(padding: EdgeInsets.all(8.0), child: Center(child: CircularProgressIndicator()));
                       if (!productSnapshot.hasData || productSnapshot.data!.docs.isEmpty) return const Padding(padding: EdgeInsets.all(16.0), child: Text('Nenhum produto nesta categoria.'));
 
-                      final products = productSnapshot.data!.docs
-                          .map((doc) => Product.fromFirestore(doc as DocumentSnapshot<Map<String, dynamic>>))
-                          .toList();
+                      final products = productSnapshot.data!.docs.map((doc) => Product.fromFirestore(doc as DocumentSnapshot<Map<String, dynamic>>)).toList();
 
                       return Column(
-                        children: products.map((product) => ListTile(
-                          title: Text(product.name),
-                          subtitle: Text(
-                              'Custo: ${product.costPrice != null ? currencyFormatter.format(product.costPrice) : '-'} | Venda: ${currencyFormatter.format(product.salePrice)}'
-                          ),                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit),
-                                tooltip: 'Editar Produto',
-                                onPressed: () {
-                                  Navigator.push(context, MaterialPageRoute(builder: (context) => AddEditProductPage(
-                                    institutionId: _institutionId!,
-                                    category: category,
-                                    product: product,
-                                  )));
-                                },
-                              ),
-                              IconButton(
-                                icon: Icon(Icons.delete, color: Theme.of(context).colorScheme.error.withOpacity(0.7)),
-                                tooltip: 'Excluir Produto',
-                                onPressed: () => _deleteProduct(product),
-                              ),
-                            ],
-                          ),
-                        )).toList(),
+                        children: products.map((product) {
+                          // A lógica que decide se os botões de editar/apagar aparecem.
+                          final bool canManageProduct = isAdmin || product.createdBy == _currentUserData!.id;
+
+                          return ListTile(
+                            title: Text(product.name),
+                            subtitle: Text('Venda: ${currencyFormatter.format(product.salePrice)}'),
+                            trailing: canManageProduct ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.edit),
+                                  tooltip: 'Editar Produto',
+                                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => AddEditProductPage(institutionId: _institutionId!, category: category, product: product))),
+                                ),
+                                IconButton(
+                                  icon: Icon(Icons.delete, color: Theme.of(context).colorScheme.error.withOpacity(0.7)),
+                                  tooltip: 'Excluir Produto',
+                                  onPressed: () => _deleteProduct(product),
+                                ),
+                              ],
+                            ) : null, // Se não pode gerir, não mostra botões.
+                          );
+                        }).toList(),
                       );
                     },
                   ),
+                  // O botão de adicionar produto continua visível para todos dentro da categoria
                   Padding(
                     padding: const EdgeInsets.only(right: 16.0, bottom: 8.0),
                     child: Align(
@@ -295,12 +344,7 @@ class _ProductsListPageState extends State<ProductsListPage> {
                       child: TextButton.icon(
                         icon: const Icon(Icons.add, size: 18),
                         label: const Text('Adicionar Produto'),
-                        onPressed: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => AddEditProductPage(
-                            institutionId: _institutionId!,
-                            category: category,
-                          )));
-                        },
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => AddEditProductPage(institutionId: _institutionId!, category: category))),
                       ),
                     ),
                   ),

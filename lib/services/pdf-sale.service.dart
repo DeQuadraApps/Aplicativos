@@ -73,7 +73,11 @@ class PdfSaleService {
         pw.Text('Relatório de Venda', style: pw.TextStyle(fontSize: 18, color: PdfColors.grey700)),
         pw.SizedBox(height: 5),
         pw.Text('Data: ${DateFormat('dd/MM/yyyy HH:mm').format(sale.saleDate)}'),
-        pw.Divider(thickness: 2),
+        pw.SizedBox(height: 10),
+        if (sale.salespersonName != null && sale.salespersonName!.isNotEmpty)
+          _buildInfoRow('Vendedor:', sale.salespersonName!),
+
+        pw.Divider(thickness: 2, height: 20),
         pw.SizedBox(height: 10),
       ],
     );

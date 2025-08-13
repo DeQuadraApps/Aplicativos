@@ -1,5 +1,4 @@
 // lib/pages/home_page.dart
-
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,6 +6,10 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:quadra_vendas/models/goal.model.dart';
+import 'package:quadra_vendas/models/user.model.dart';
+import 'package:quadra_vendas/pages/admin/reports/report-options.page.dart';
+import 'package:quadra_vendas/pages/admin/salespeople/salespeople-list.page.dart';
 import 'package:quadra_vendas/pages/clients/clients-list.page.dart';
 import 'package:quadra_vendas/pages/dashboard/dashboard.page.dart';
 import 'package:quadra_vendas/pages/info/info.page.dart';
@@ -15,13 +18,29 @@ import 'package:quadra_vendas/pages/sales/direct-sale.page.dart';
 import 'package:quadra_vendas/pages/sales/new-sale.page.dart';
 import 'package:quadra_vendas/pages/sales/sales-list.page.dart';
 import 'package:quadra_vendas/pages/settings/settings.page.dart';
+import 'package:quadra_vendas/widgets/goal-progress-card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:showcaseview/showcaseview.dart';
 
-class DashboardMetrics {
-  final int clientCount; final int productCount; final int salesCount;
-  final double totalRevenue; final double monthRevenue;
-  DashboardMetrics({required this.clientCount, required this.productCount, required this.salesCount, required this.totalRevenue, required this.monthRevenue});
+class HomePageMetrics {
+  final int clientCount;
+  final int productCount;
+  final int salesCount;
+  final double totalRevenue;
+  final double monthRevenue;
+  final SalesGoal? monthlyGoal;
+  final int? myClientsCount;
+
+  HomePageMetrics({
+    required this.clientCount,
+    required this.productCount,
+    required this.salesCount,
+    required this.totalRevenue,
+    required this.monthRevenue,
+    this.monthlyGoal,
+    this.myClientsCount
+  });
+
   bool get hasData => clientCount > 0 || productCount > 0 || salesCount > 0;
 }
 
@@ -45,26 +64,25 @@ class _HomePageContent extends StatefulWidget {
 
 class _HomePageContentState extends State<_HomePageContent> {
   final User? currentUser = FirebaseAuth.instance.currentUser;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  // Chaves para o tutorial
+  final GlobalKey _keyMenu = GlobalKey();
+  final GlobalKey _keyDashboard = GlobalKey();
+  final GlobalKey _keyVendedoresMenu = GlobalKey();
+  final GlobalKey _keyRelatorioMenu = GlobalKey();
+  final GlobalKey _keyClientesMenu = GlobalKey();
+  final GlobalKey _keyProdutosMenu = GlobalKey();
+  final GlobalKey _keyVendasMenu = GlobalKey();
+  final GlobalKey _keyRegistrarVendaMenu = GlobalKey();
+
+  String? _institutionId;
   String _institutionName = 'Carregando...';
   String _expirationDateStr = '';
   String _userName = '';
+  UserModel? _currentUserData;
 
-  late Future<DashboardMetrics> _metricsFuture;
-
-  // =======================================================
-  // A SOLUÇÃO DEFINITIVA: UMA CHAVE GLOBAL PARA O SCAFFOLD
-  // =======================================================
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-
-  final GlobalKey _keyMenu = GlobalKey();
-  final GlobalKey _keyDashboard = GlobalKey();
-  final GlobalKey _keyNewSale = GlobalKey();
-  final GlobalKey _keyClients = GlobalKey();
-  final GlobalKey _keyProducts = GlobalKey();
-  final GlobalKey _keySales = GlobalKey();
-  final GlobalKey _keySettings = GlobalKey();
-  final GlobalKey _keyReplayTour = GlobalKey();
+  late Future<HomePageMetrics> _metricsFuture;
 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _isOffline = false;
@@ -73,7 +91,7 @@ class _HomePageContentState extends State<_HomePageContent> {
   void initState() {
     super.initState();
     _initConnectivity();
-    _metricsFuture = _fetchDashboardData();
+    _metricsFuture = _fetchHomePageData();
     WidgetsBinding.instance.addPostFrameCallback((_) => _promptTourIfNeeded());
   }
 
@@ -83,21 +101,59 @@ class _HomePageContentState extends State<_HomePageContent> {
     super.dispose();
   }
 
+  // Helper para buscar as chaves do tour que ficam DENTRO do menu
+  List<GlobalKey> _getMenuTourKeys() {
+    final bool isAdmin = _currentUserData?.role == 'admin';
+    final keys = <GlobalKey>[];
+
+    if (isAdmin) {
+      keys.add(_keyVendedoresMenu);
+      keys.add(_keyRelatorioMenu);
+    }
+
+    keys.addAll([
+      _keyClientesMenu,
+      _keyProdutosMenu,
+      _keyVendasMenu,
+      _keyRegistrarVendaMenu,
+    ]);
+
+    return keys;
+  }
+
+  // Inicia a segunda parte do tour (itens do menu) após um atraso
+  void _startMenuTour() {
+    // Abre o drawer e espera a animação terminar antes de iniciar o showcase
+    _scaffoldKey.currentState?.openDrawer();
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) {
+        ShowCaseWidget.of(context).startShowCase(_getMenuTourKeys());
+      }
+    });
+  }
+
+  // Inicia a primeira parte do tour
+  void _startFullTour() {
+    if (mounted) {
+      ShowCaseWidget.of(context).startShowCase([_keyDashboard, _keyMenu]);
+    }
+  }
+
+
   Future<void> _initConnectivity() async {
     final connectivityResult = await Connectivity().checkConnectivity();
     _updateConnectionStatus(connectivityResult);
-
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen(_updateConnectionStatus);
   }
 
   void _updateConnectionStatus(List<ConnectivityResult> result) {
+    if (!mounted) return;
     final isOffline = result.contains(ConnectivityResult.none);
     if (_isOffline != isOffline) {
       setState(() {
         _isOffline = isOffline;
-        // Se a ligação voltar, atualiza os dados do dashboard
         if (!_isOffline) {
-          _metricsFuture = _fetchDashboardData();
+          _metricsFuture = _fetchHomePageData();
         }
       });
     }
@@ -106,24 +162,16 @@ class _HomePageContentState extends State<_HomePageContent> {
   Future<void> _navigateToSalePage() async {
     final prefs = await SharedPreferences.getInstance();
     final mode = prefs.getString('saleMode') ?? 'cart';
-
-    Navigator.pop(context);
-
-    Widget pageToNavigate = (mode == 'direct')
-        ? const DirectSalePage()
-        : const NewSalePage();
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => pageToNavigate),
-    );
+    if(mounted) Navigator.pop(context);
+    Widget pageToNavigate = (mode == 'direct') ? const DirectSalePage() : const NewSalePage();
+    if(mounted) Navigator.push(context, MaterialPageRoute(builder: (context) => pageToNavigate));
   }
 
   Future<void> _promptTourIfNeeded() async {
     final prefs = await SharedPreferences.getInstance();
     final bool tourCompleted = prefs.getBool('home_tour_completed') ?? false;
 
-    if (!tourCompleted) {
+    if (!tourCompleted && mounted) {
       final bool? wantTour = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -137,116 +185,233 @@ class _HomePageContentState extends State<_HomePageContent> {
       );
       await prefs.setBool('home_tour_completed', true);
       if (wantTour == true) {
-        _startMainTour();
+        _startFullTour();
       }
     }
   }
 
-  void _startMainTour() {
-    ShowCaseWidget.of(context).startShowCase([_keyDashboard, _keyMenu]);
-  }
-
-  void _startDrawerTour() {
-    ShowCaseWidget.of(context).startShowCase([_keyClients, _keyProducts, _keySales, _keyNewSale, _keySettings, _keyReplayTour]);
-  }
-
-  Future<DashboardMetrics> _fetchDashboardData() async {
-    // ... esta função permanece a mesma ...
+  Future<HomePageMetrics> _fetchHomePageData() async {
     if (currentUser == null) throw Exception("Utilizador não autenticado.");
+
     final userDoc = await FirebaseFirestore.instance.collection('users').doc(currentUser!.uid).get();
     if (!userDoc.exists) throw Exception("Dados do utilizador não encontrados.");
-    final userData = userDoc.data()!;
-    final institutionId = userData['institutionId'] as String?;
-    if (institutionId == null) throw Exception("Utilizador não vinculado a uma instituição.");
-    if(mounted) {
-      final institutionDoc = await FirebaseFirestore.instance.collection('institutions').doc(institutionId).get();
+
+    final localUserData = UserModel.fromFirestore(userDoc);
+    final institutionId = localUserData.institutionId;
+
+    final institutionDocFuture = FirebaseFirestore.instance.collection('institutions').doc(institutionId).get();
+
+    final institutionRef = FirebaseFirestore.instance.collection('institutions').doc(institutionId);
+    final now = DateTime.now();
+    final startOfMonth = DateTime(now.year, now.month, 1);
+
+    Query salesQuery = institutionRef.collection('sales');
+    if(localUserData.role != 'admin'){
+      salesQuery = salesQuery.where('userId', isEqualTo: currentUser!.uid);
+    }
+    final salesSnapshotFuture = salesQuery.get();
+
+    SalesGoal? monthlyGoal;
+    if (localUserData.role != 'admin') {
+      final goalQuery = await institutionRef.collection('goals')
+          .where('salespersonId', isEqualTo: currentUser!.uid)
+          .where('year', isEqualTo: now.year)
+          .where('month', isEqualTo: now.month)
+          .limit(1)
+          .get();
+      if(goalQuery.docs.isNotEmpty) {
+        monthlyGoal = SalesGoal.fromFirestore(goalQuery.docs.first);
+      }
+    }
+
+    int clientCount = 0;
+    int productCount = 0;
+    int myClientsCount = 0;
+    if(localUserData.role == 'admin'){
+      final results = await Future.wait([
+        institutionRef.collection('clients').count().get(),
+        institutionRef.collection('products').count().get(),
+      ]);
+      clientCount = (results[0]).count ?? 0;
+      productCount = (results[1]).count ?? 0;
+    } else {
+      // LÓGICA PARA VENDEDOR: Busca a contagem de seus próprios clientes
+      final myClientsSnapshot = await institutionRef
+          .collection('clients')
+          .where('salespersonId', isEqualTo: currentUser!.uid) // <-- AJUSTE AQUI SE O NOME DO CAMPO FOR OUTRO
+          .count()
+          .get();
+      myClientsCount = myClientsSnapshot.count ?? 0;
+    }
+
+    final institutionDoc = await institutionDocFuture;
+    final salesSnapshot = await salesSnapshotFuture;
+
+    if (mounted) {
       setState(() {
-        _userName = userData['fullName'] ?? currentUser!.email!;
+        _institutionId = institutionId;
+        _currentUserData = localUserData;
+        _userName = localUserData.fullName;
         _institutionName = institutionDoc.data()?['name'] ?? 'Instituição sem nome';
         final timestamp = institutionDoc.data()?['licenseExpiresAt'] as Timestamp?;
         if (timestamp != null) _expirationDateStr = DateFormat('dd/MM/yyyy').format(timestamp.toDate());
       });
     }
-    final institutionRef = FirebaseFirestore.instance.collection('institutions').doc(institutionId);
-    final results = await Future.wait([
-      institutionRef.collection('clients').count().get(),
-      institutionRef.collection('products').count().get(),
-      institutionRef.collection('sales').get(),
-    ]);
-    final clientCount = (results[0] as AggregateQuerySnapshot).count ?? 0;
-    final productCount = (results[1] as AggregateQuerySnapshot).count ?? 0;
-    final salesSnapshot = results[2] as QuerySnapshot<Map<String, dynamic>>;
-    final salesCount = salesSnapshot.size;
+
+    int salesCount = salesSnapshot.size;
     double totalRevenue = 0, monthRevenue = 0;
-    final now = DateTime.now(), startOfMonth = DateTime(now.year, now.month, 1);
     for (var doc in salesSnapshot.docs) {
-      final saleData = doc.data();
+      final saleData = doc.data() as Map<String, dynamic>;
       final amount = (saleData['totalAmount'] as num? ?? 0).toDouble();
       totalRevenue += amount;
-      if ((saleData['saleDate'] as Timestamp).toDate().isAfter(startOfMonth)) monthRevenue += amount;
+      if ((saleData['saleDate'] as Timestamp).toDate().isAfter(startOfMonth)) {
+        monthRevenue += amount;
+      }
     }
-    return DashboardMetrics(clientCount: clientCount, productCount: productCount, salesCount: salesCount, totalRevenue: totalRevenue, monthRevenue: monthRevenue);
+
+    return HomePageMetrics(
+      clientCount: clientCount,
+      productCount: productCount,
+      salesCount: salesCount,
+      totalRevenue: totalRevenue,
+      monthRevenue: monthRevenue,
+      monthlyGoal: monthlyGoal,
+      myClientsCount: myClientsCount,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final colorScheme = Theme.of(context).colorScheme;
-    final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+    final bool isAdmin = _currentUserData?.role == 'admin';
 
     return Scaffold(
-      // Atribuímos a chave ao Scaffold
       key: _scaffoldKey,
-      drawer: _buildDrawer(context, textTheme, colorScheme),
+      drawer: _buildDrawer(context, textTheme, colorScheme, isAdmin),
       appBar: AppBar(
         leading: Showcase(
           key: _keyMenu,
           description: 'Toque aqui para aceder a todos os menus da aplicação.',
-          onTargetClick: () async {
-            // Usamos a chave para abrir o drawer
-            _scaffoldKey.currentState?.openDrawer();
-            Future.delayed(const Duration(milliseconds: 300), () {
-              _startDrawerTour();
-            });
-          },
+          // CORREÇÃO: Usamos disposeOnTap e onTargetClick para controlar o fluxo
           disposeOnTap: true,
+          onTargetClick: () => _startMenuTour(),
           child: IconButton(
             icon: const Icon(Icons.menu),
-            // Usamos a chave para abrir o drawer
             onPressed: () => _scaffoldKey.currentState?.openDrawer(),
           ),
         ),
         title: Column(
           children: [
             Text(_institutionName, style: textTheme.titleLarge),
-            if (_expirationDateStr.isNotEmpty)
+            if (_expirationDateStr.isNotEmpty && isAdmin)
               Text('Licença expira em: $_expirationDateStr', style: textTheme.bodySmall?.copyWith(color: colorScheme.error, fontWeight: FontWeight.bold)),
           ],
         ),
         centerTitle: true,
         actions: [
-          IconButton(tooltip: "Atualizar Dados", icon: const Icon(Icons.refresh), onPressed: () => setState(() { _metricsFuture = _fetchDashboardData(); })),
+          IconButton(tooltip: "Atualizar Dados", icon: const Icon(Icons.refresh), onPressed: () => setState(() { _metricsFuture = _fetchHomePageData(); })),
         ],
       ),
       body: _isOffline
           ? _buildOfflineBody()
-          : FutureBuilder<DashboardMetrics>(
+          : FutureBuilder<HomePageMetrics>(
         future: _metricsFuture,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text("Erro ao carregar o painel: ${snapshot.error}"));
-          }
-          if (!snapshot.hasData || !snapshot.data!.hasData) {
-            return _buildWelcomeBody(textTheme, colorScheme);
-          }
+          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          if (snapshot.hasError) return Center(child: Text("Erro ao carregar o painel: ${snapshot.error}"));
+          if (!snapshot.hasData || _currentUserData == null) return _buildWelcomeBody(textTheme, colorScheme);
 
           final metrics = snapshot.data!;
-          return _buildDashboardGrid(metrics, currencyFormatter);
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: Showcase(
+              key: _keyDashboard,
+              description: 'Este é o seu painel principal, com as métricas mais importantes do seu negócio.',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!isAdmin && metrics.monthlyGoal != null) ...[
+                    GoalProgressCard(
+                      goal: metrics.monthlyGoal!,
+                      totalSold: metrics.monthRevenue,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  if (!isAdmin)
+                    _buildSalespersonDashboard(metrics),
+
+                  if (isAdmin)
+                    _buildAdminDashboard(metrics),
+                ],
+              ),
+            ),
+          );
         },
       ),
+    );
+  }
+
+  Widget _buildSalespersonDashboard(HomePageMetrics metrics) {
+    final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+
+    // Usando LayoutBuilder para tornar o painel responsivo
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Define o número de colunas com base na largura da tela
+        int crossAxisCount = 2; // Padrão para telas menores (celular)
+        if (constraints.maxWidth >= 800) {
+          crossAxisCount = 3; // 3 colunas para telas maiores (desktop)
+        }
+
+        return GridView.count(
+          crossAxisCount: crossAxisCount,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 1.2,
+          children: [
+            DashboardCard(icon: Icons.attach_money, title: 'Minhas Vendas (Mês)', value: currencyFormatter.format(metrics.monthRevenue), color: Colors.green),
+            DashboardCard(icon: Icons.receipt_long, title: 'Nº de Vendas', value: metrics.salesCount.toString(), color: Colors.teal),
+            DashboardCard(
+                icon: Icons.people,
+                title: 'Meus Clientes',
+                value: metrics.myClientsCount?.toString() ?? '0',
+                color: Colors.orange
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildAdminDashboard(HomePageMetrics metrics) {
+    final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        int crossAxisCount = 2;
+        if (constraints.maxWidth > 1200) crossAxisCount = 5;
+        else if (constraints.maxWidth > 800) crossAxisCount = 4;
+
+        return GridView.count(
+          crossAxisCount: crossAxisCount,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 1.2,
+          children: [
+            DashboardCard(icon: Icons.attach_money, title: 'Vendas (Este Mês)', value: currencyFormatter.format(metrics.monthRevenue), color: Colors.green),
+            DashboardCard(icon: Icons.receipt_long, title: 'Total de Vendas', value: currencyFormatter.format(metrics.totalRevenue), color: Colors.blue),
+            DashboardCard(icon: Icons.people, title: 'Total de Clientes', value: metrics.clientCount.toString(), color: Colors.orange),
+            DashboardCard(icon: Icons.inventory, title: 'Total de Produtos', value: metrics.productCount.toString(), color: Colors.purple),
+            DashboardCard(icon: Icons.shopping_cart, title: 'Nº de Vendas', value: metrics.salesCount.toString(), color: Colors.teal),
+          ],
+        );
+      },
     );
   }
 
@@ -259,24 +424,15 @@ class _HomePageContentState extends State<_HomePageContent> {
           children: [
             Icon(Icons.wifi_off, size: 64, color: Theme.of(context).colorScheme.secondary),
             const SizedBox(height: 16),
-            Text(
-              'Painel inacessível',
-              style: Theme.of(context).textTheme.headlineSmall,
-              textAlign: TextAlign.center,
-            ),
+            Text('Você está Offline', style: Theme.of(context).textTheme.headlineSmall, textAlign: TextAlign.center),
             const SizedBox(height: 8),
-            Text(
-              'Você está offline. As outras funcionalidades como registar vendas e clientes continuam disponíveis e serão sincronizadas quando a ligação voltar.',
-              style: Theme.of(context).textTheme.bodyMedium,
-              textAlign: TextAlign.center,
-            ),
+            Text('O painel de métricas está inacessível, mas pode continuar a registar clientes e vendas.', style: Theme.of(context).textTheme.bodyMedium, textAlign: TextAlign.center),
           ],
         ),
       ),
     );
   }
 
-  // Widget para o corpo da página quando não há dados
   Widget _buildWelcomeBody(TextTheme textTheme, ColorScheme colorScheme) {
     return Center(
       child: Padding(
@@ -295,31 +451,7 @@ class _HomePageContentState extends State<_HomePageContent> {
     );
   }
 
-  // Widget para o grid do dashboard
-  Widget _buildDashboardGrid(DashboardMetrics metrics, NumberFormat currencyFormatter) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Showcase(
-        key: _keyDashboard,
-        description: 'Este é o seu painel principal. Aqui você tem uma visão rápida das métricas mais importantes do seu negócio.',
-        child: GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 12, crossAxisSpacing: 12, childAspectRatio: 1.2,
-          children: [
-            DashboardCard(icon: Icons.attach_money, title: 'Vendas (Este Mês)', value: currencyFormatter.format(metrics.monthRevenue), color: Colors.green),
-            DashboardCard(icon: Icons.receipt_long, title: 'Total de Vendas', value: currencyFormatter.format(metrics.totalRevenue), color: Colors.blue),
-            DashboardCard(icon: Icons.people, title: 'Total de Clientes', value: metrics.clientCount.toString(), color: Colors.orange),
-            DashboardCard(icon: Icons.inventory, title: 'Total de Produtos', value: metrics.productCount.toString(), color: Colors.purple),
-            DashboardCard(icon: Icons.shopping_cart, title: 'Nº de Vendas', value: metrics.salesCount.toString(), color: Colors.teal),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Drawer _buildDrawer(BuildContext context, TextTheme textTheme, ColorScheme colorScheme) {
+  Drawer _buildDrawer(BuildContext context, TextTheme textTheme, ColorScheme colorScheme, bool isAdmin) {
     return Drawer(
       child: ListView(
         padding: EdgeInsets.zero,
@@ -337,46 +469,67 @@ class _HomePageContentState extends State<_HomePageContent> {
             ),
           ),
           ListTile(leading: const Icon(Icons.home_outlined), title: const Text('Início'), onTap: () => Navigator.pop(context)),
+
+          if (isAdmin)
+            Showcase(
+              key: _keyVendedoresMenu,
+              description: 'Gerencie aqui a sua equipa de vendedores.',
+              child: ListTile(
+                leading: const Icon(Icons.badge_outlined),
+                title: const Text('Vendedores'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const SalespeopleListPage()));
+                },
+              ),
+            ),
+
+          if (isAdmin)
+            Showcase(
+              key: _keyRelatorioMenu,
+              description: 'Emita relatórios detalhados de vendas, produtos e clientes.',
+              child: ListTile(
+                leading: const Icon(Icons.assessment_outlined),
+                title: const Text('Emitir Relatório'),
+                onTap: () {
+                  Navigator.pop(context);
+                  if (_institutionId != null) {
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => ReportOptionsPage(institutionId: _institutionId!)));
+                  }
+                },
+              ),
+            ),
+
           Showcase(
-            key: _keyClients,
-            description: 'Gerencie e edite facilmente as informações dos seus clientes.',
-            child: ListTile(leading: const Icon(Icons.people_alt_outlined), title: const Text('Clientes'), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const ClientsListPage())); })
+            key: _keyClientesMenu,
+            description: 'Aceda aqui à sua lista de clientes para adicionar, editar ou visualizar.',
+            child: ListTile(leading: const Icon(Icons.people_alt_outlined), title: const Text('Clientes'), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const ClientsListPage())); }),
           ),
           Showcase(
-            key: _keyProducts,
-            description: 'Cadastre e atualize seus produtos de forma prática e rápida.',
-            child: ListTile(leading: const Icon(Icons.inventory_2_outlined), title: const Text('Produtos'), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const ProductsListPage())); })
+            key: _keyProdutosMenu,
+            description: 'Aceda aqui à sua lista de produtos.',
+            child: ListTile(leading: const Icon(Icons.inventory_2_outlined), title: const Text('Produtos'), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const ProductsListPage())); }),
           ),
           Showcase(
-            key: _keySales,
-            description: 'Acompanhe todas as vendas realizadas com detalhes e facilidade.',
-            child: ListTile(leading: const Icon(Icons.shopping_cart_outlined), title: const Text('Vendas'), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const SalesListPage())); })
+            key: _keyVendasMenu,
+            description: 'Visualize aqui o seu histórico de vendas realizadas.',
+            child: ListTile(leading: const Icon(Icons.shopping_cart_outlined), title: const Text('Vendas'), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const SalesListPage())); }),
           ),
           Showcase(
-            key: _keyNewSale,
-            description: 'Use este menu para registar uma nova venda rapidamente.',
+            key: _keyRegistrarVendaMenu,
+            description: 'Toque aqui para iniciar o registo de uma nova venda.',
             child: ListTile(leading: const Icon(Icons.point_of_sale_outlined), title: const Text('Registrar Venda'), onTap: _navigateToSalePage),
           ),
           const Divider(),
-          Showcase(
-            key: _keyReplayTour,
-            description: 'Pode rever este guia a qualquer momento clicando aqui.',
-            disposeOnTap: true,
-            onTargetClick: () => ShowCaseWidget.of(context).dismiss(),
-            child: ListTile(
-              leading: const Icon(Icons.help_outline),
-              title: const Text('Rever Tour'),
-              onTap: () {
-                Navigator.pop(context);
-                _startMainTour();
-              },
-            ),
-          ),
           ListTile(leading: const Icon(Icons.info_outline), title: const Text('Informações'), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const InfoPage())); }),
-          Showcase(
-            key: _keySettings,
-            description: 'Aqui você pode alterar as configurações da aplicação, como o tema visual.',
-            child: ListTile(leading: const Icon(Icons.settings_outlined), title: const Text('Configurações'), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsPage())); }),
+          ListTile(leading: const Icon(Icons.settings_outlined), title: const Text('Configurações'), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsPage())); }),
+          ListTile(
+            leading: const Icon(Icons.school_outlined),
+            title: const Text('Rever Tutorial'),
+            onTap: () {
+              Navigator.pop(context);
+              _startFullTour();
+            },
           ),
           const Divider(),
           ListTile(leading: const Icon(Icons.logout), title: const Text('Sair'), onTap: () => FirebaseAuth.instance.signOut()),

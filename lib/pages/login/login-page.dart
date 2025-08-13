@@ -1,12 +1,10 @@
-// lib/pages/login_page.dart
+// lib/pages/login/login-page.dart
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:quadra_vendas/pages/signup/signup.page.dart';
-
+import 'package:quadra_vendas/pages/admin/register-initial-admin.page.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
-
 import 'package:quadra_vendas/widgets/elevated-button.widget.dart';
 import 'package:quadra_vendas/widgets/text-form-field.widget.dart';
 
@@ -24,24 +22,30 @@ class _LoginPageState extends State<LoginPage> {
 
   bool _isLoading = false;
 
-  // 2. A antiga função _showSnackbar não é mais necessária!
-  //    Pode apagar ou comentar:
-  //
-  // void _showSnackbar(String message) { ... }
-
-
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      // O sucesso é implícito, pois o AuthGate fará a navegação.
-      // Se quisesse mostrar uma mensagem, seria:
-      // AppSnackBar.showSuccess(context, message: "Login bem-sucedido!");
+
+      // +++ VERIFICAÇÃO DE STATUS APÓS O LOGIN +++
+      if (userCredential.user != null) {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .get();
+
+        if (userDoc.exists && userDoc.data()?['status'] == 'inactive') {
+          // Se o utilizador estiver inativo, desloga-o imediatamente e mostra um erro.
+          await FirebaseAuth.instance.signOut();
+          if (mounted) AppSnackBar.showError(context, message: 'A sua conta foi desativada. Por favor, contacte o administrador.');
+        }
+        // Se estiver ativo, o AuthGate fará o resto.
+      }
 
     } on FirebaseAuthException catch (e) {
       String message;
@@ -50,47 +54,7 @@ class _LoginPageState extends State<LoginPage> {
       } else {
         message = 'Ocorreu um erro. Tente novamente.';
       }
-      // 3. Use o helper para mostrar o erro
-      AppSnackBar.showError(context, message: message);
-
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _register() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _isLoading = true);
-
-    try {
-      UserCredential userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
-
-      if (userCredential.user != null) {
-        await FirebaseFirestore.instance.collection('users').doc(userCredential.user!.uid).set({
-          'email': userCredential.user!.email,
-          'uid': userCredential.user!.uid,
-          'createdAt': Timestamp.now(),
-          'nome': '',
-        });
-        // 4. Use o helper para mostrar o sucesso
-        AppSnackBar.showSuccess(context, message: "Usuário registrado com sucesso!");
-      }
-    } on FirebaseAuthException catch (e) {
-      String message;
-      if (e.code == 'weak-password') {
-        message = 'A senha fornecida é muito fraca (mínimo 6 caracteres).';
-      } else if (e.code == 'email-already-in-use') {
-        message = 'Este e-mail já está em uso. Tente fazer login.';
-      } else {
-        message = 'Ocorreu um erro no registro. Tente novamente.';
-      }
-      // 5. Use o helper para mostrar o erro
-      AppSnackBar.showError(context, message: message);
+      if(mounted) AppSnackBar.showError(context, message: message);
 
     } finally {
       if (mounted) {
@@ -101,7 +65,6 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    // ... O resto do seu widget build continua exatamente o mesmo
     final textTheme = Theme.of(context).textTheme;
 
     return GestureDetector(
@@ -116,17 +79,9 @@ class _LoginPageState extends State<LoginPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'Bem-vindo!',
-                  textAlign: TextAlign.center,
-                  style: textTheme.headlineMedium,
-                ),
+                Text('Bem-vindo!', textAlign: TextAlign.center, style: textTheme.headlineMedium),
                 const SizedBox(height: 8),
-                Text(
-                  'Acesse sua conta Quadra Vendas',
-                  textAlign: TextAlign.center,
-                  style: textTheme.bodyMedium,
-                ),
+                Text('Acesse sua conta Quadra Vendas', textAlign: TextAlign.center, style: textTheme.bodyMedium),
                 const SizedBox(height: 48),
                 Form(
                   key: _formKey,
@@ -136,17 +91,14 @@ class _LoginPageState extends State<LoginPage> {
                         controller: _emailController,
                         labelText: "E-mail",
                         keyboardType: TextInputType.emailAddress,
-                        validator: (value) =>
-                        value == null || !value.contains('@') ? 'E-mail inválido' : null,
+                        validator: (value) => value == null || !value.contains('@') ? 'E-mail inválido' : null,
                       ),
                       const SizedBox(height: 16),
                       CustomInputField(
                         controller: _passwordController,
                         labelText: "Senha",
                         isPassword: true,
-                        validator: (value) => value == null || value.length < 6
-                            ? 'A senha deve ter no mínimo 6 caracteres'
-                            : null,
+                        validator: (value) => value == null || value.length < 6 ? 'A senha deve ter no mínimo 6 caracteres' : null,
                       ),
                       const SizedBox(height: 32),
                       ShadowButton(
@@ -158,27 +110,15 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text("Não tem uma conta?", style: textTheme.bodyMedium),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => const SignUpPage()),
-                        );
-                      },
-                      child: Text(
-                        "Registre-se",
-                        style: textTheme.titleMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.primary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                // TextButton(
+                //   child: const Text('Não tem uma conta? Cadastrar Admin'),
+                //   onPressed: () {
+                //     Navigator.push(
+                //         context,
+                //         MaterialPageRoute(
+                //             builder: (context) => const RegisterInitialAdminPage()));
+                //   },
+                // ),
               ],
             ),
           ),

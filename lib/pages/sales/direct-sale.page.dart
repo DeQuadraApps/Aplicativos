@@ -2,6 +2,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:quadra_vendas/services/pdf-sale.service.dart';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,8 +13,8 @@ import 'package:printing/printing.dart';
 import 'package:quadra_vendas/models/client.model.dart';
 import 'package:quadra_vendas/models/product.model.dart';
 import 'package:quadra_vendas/models/sale.model.dart';
+import 'package:quadra_vendas/models/user.model.dart'; // ✨ IMPORTAR O MODELO DE USUÁRIO
 import 'package:quadra_vendas/pages/clients/add-edit-client.page.dart';
-import 'package:quadra_vendas/services/pdf-sale.service.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -28,24 +30,26 @@ class _DirectSalePageState extends State<DirectSalePage> {
   String? _institutionId;
   String _institutionName = '';
 
-  // Passo 1
   Client? _selectedClient;
   final _clientSearchController = TextEditingController();
   final _paymentMethodController = TextEditingController();
   final _clientFormKey = GlobalKey<FormState>();
 
-  // Passo 2
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
   final _productSearchController = TextEditingController();
   final Map<String, SaleItem> _saleItemsMap = {};
 
-  // Passo 3
   bool _withInvoice = false;
   bool _newClient = false;
   final _observationsController = TextEditingController();
-
   bool _isLoading = true;
+
+  // ✨ NOVOS ESTADOS PARA GERENCIAR USUÁRIOS E FUNÇÕES
+  String _currentUserRole = '';
+  String _currentUserName = '';
+  List<UserModel> _salespeopleList = [];
+  UserModel? _selectedSalespersonForSale;
 
   @override
   void initState() {
@@ -64,34 +68,73 @@ class _DirectSalePageState extends State<DirectSalePage> {
 
   Future<void> _loadInitialData() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) { setState(() => _isLoading = false); return; }
+    if (user == null) {
+      if(mounted) setState(() => _isLoading = false);
+      return;
+    }
     try {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      final institutionId = userDoc.data()?['institutionId'];
-      if (institutionId == null) { setState(() => _isLoading = false); return; }
+      final userData = UserModel.fromFirestore(userDoc); // ✨ Usar o modelo de usuário
+      final institutionId = userData.institutionId;
+
+      if(institutionId == null) {
+        if(mounted) setState(() => _isLoading = false);
+        return;
+      }
 
       final instDoc = await FirebaseFirestore.instance.collection('institutions').doc(institutionId).get();
-      final productsSnapshot = await FirebaseFirestore.instance
-          .collection('institutions').doc(institutionId)
-          .collection('products').orderBy('name').get();
+      final adminId = instDoc.data()?['ownerId'];
+
+      // ✨ BUSCAR LISTA DE VENDEDORES SE O USUÁRIO FOR ADMIN
+      if (userData.role == 'admin') {
+        final salespeopleSnapshot = await FirebaseFirestore.instance
+            .collection('users')
+            .where('institutionId', isEqualTo: institutionId)
+            .get();
+
+        _salespeopleList = salespeopleSnapshot.docs
+            .map((doc) => UserModel.fromFirestore(doc))
+            .toList();
+
+        // Define o admin como o vendedor padrão selecionado
+        _selectedSalespersonForSale = userData;
+      }
+
+      final salespersonProductsQuery = FirebaseFirestore.instance.collection('institutions').doc(institutionId).collection('products').where('createdBy', isEqualTo: user.uid).get();
+      final institutionProductsQuery = FirebaseFirestore.instance.collection('institutions').doc(institutionId).collection('products').where('createdBy', isEqualTo: adminId).get();
+
+      final results = await Future.wait([salespersonProductsQuery, institutionProductsQuery]);
+      final salespersonProducts = results[0].docs.map((doc) => Product.fromFirestore(doc)).toList();
+      final institutionProducts = results[1].docs.map((doc) => Product.fromFirestore(doc)).toList();
+
+      final allProductsMap = <String, Product>{};
+      for (var product in institutionProducts) { allProductsMap[product.id!] = product; }
+      for (var product in salespersonProducts) { allProductsMap[product.id!] = product; }
+      final combinedProducts = allProductsMap.values.toList();
+      combinedProducts.sort((a, b) => a.name.compareTo(b.name));
 
       if (mounted) {
         setState(() {
           _institutionId = institutionId;
           _institutionName = instDoc.data()?['name'] ?? '';
-          _allProducts = productsSnapshot.docs.map((doc) => Product.fromFirestore(doc)).toList();
+          _allProducts = combinedProducts;
           _filteredProducts = _allProducts;
+          // ✨ SALVAR DADOS DO USUÁRIO ATUAL
+          _currentUserRole = userData.role;
+          _currentUserName = userData.fullName;
           _isLoading = false;
         });
       }
-    } catch (e) {
+    } catch(e) {
       if (mounted) {
-        AppSnackBar.showError(context, message: 'Erro ao carregar dados.');
+        debugPrint("Erro ao carregar dados iniciais para venda: $e");
+        AppSnackBar.showError(context, message: 'Erro ao carregar dados da página.');
         setState(() => _isLoading = false);
       }
     }
   }
 
+  // ... (métodos _onClientSelected, _filterProducts, _updateSaleItem, _currentTotal permanecem os mesmos) ...
   void _onClientSelected(Client client) {
     setState(() {
       _selectedClient = client;
@@ -132,6 +175,12 @@ class _DirectSalePageState extends State<DirectSalePage> {
   }
 
   Future<void> _finalizeSale() async {
+    // ✨ VALIDAÇÃO ADICIONAL PARA ADMIN
+    if (_currentUserRole == 'admin' && _selectedSalespersonForSale == null) {
+      AppSnackBar.showError(context, message: 'Como administrador, você deve selecionar um vendedor.');
+      return;
+    }
+
     if (_selectedClient == null || _saleItemsMap.isEmpty) {
       AppSnackBar.showError(context, message: 'Selecione um cliente e adicione produtos para continuar.');
       return;
@@ -139,18 +188,49 @@ class _DirectSalePageState extends State<DirectSalePage> {
 
     setState(() => _isLoading = true);
 
+    // ✨ LÓGICA PARA DEFINIR O NOME E ID DO VENDEDOR
+    String? finalSalespersonName;
+    String finalUserId;
+    if (_currentUserRole == 'admin') {
+      finalSalespersonName = _selectedSalespersonForSale!.fullName;
+      finalUserId = _selectedSalespersonForSale!.id!;
+    } else {
+      finalSalespersonName = _currentUserName;
+      finalUserId = FirebaseAuth.instance.currentUser!.uid;
+    }
+
     final sale = Sale(
-      client: _selectedClient!, clientId: _selectedClient!.id!, clientName: _selectedClient!.companyName,
-      items: _saleItemsMap.values.toList(), totalAmount: _currentTotal,
-      paymentMethod: _paymentMethodController.text.trim(), withInvoice: _withInvoice,
+      client: _selectedClient!,
+      clientId: _selectedClient!.id!,
+      clientName: _selectedClient!.companyName,
+      items: _saleItemsMap.values.toList(),
+      totalAmount: _currentTotal,
+      paymentMethod: _paymentMethodController.text.trim(),
+      withInvoice: _withInvoice,
       newClient: _newClient,
-      observations: _observationsController.text.trim(), saleDate: DateTime.now(),
-      userId: FirebaseAuth.instance.currentUser!.uid,
+      observations: _observationsController.text.trim(),
+      saleDate: DateTime.now(),
+      userId: finalUserId,
+      salespersonName: finalSalespersonName, // ✨ SALVANDO O NOME CORRETO
     );
 
     try {
       final saleDocRef = await FirebaseFirestore.instance.collection('institutions').doc(_institutionId!).collection('sales').add(sale.toFirestore());
-      final saleWithId = Sale(id: saleDocRef.id, client: sale.client, clientId: sale.clientId, clientName: sale.clientName, items: sale.items, totalAmount: sale.totalAmount, paymentMethod: sale.paymentMethod, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId);
+      final saleWithId = Sale(
+        id: saleDocRef.id,
+        client: sale.client,
+        clientId: sale.clientId,
+        clientName: sale.clientName,
+        items: sale.items,
+        totalAmount: sale.totalAmount,
+        paymentMethod: sale.paymentMethod,
+        withInvoice: sale.withInvoice,
+        newClient: sale.newClient,
+        observations: sale.observations,
+        saleDate: sale.saleDate,
+        userId: sale.userId,
+        salespersonName: sale.salespersonName, // ✨ Passar o nome para o PDF
+      );
 
       final pdfService = PdfSaleService(sale: saleWithId, institutionName: _institutionName);
       final pdfBytes = await pdfService.generatePdf();
@@ -166,6 +246,7 @@ class _DirectSalePageState extends State<DirectSalePage> {
     }
   }
 
+  // ... (métodos _handleNextStep, _sharePdf, _showPostSaleDialog permanecem os mesmos) ...
   void _handleNextStep() {
     if (_isLoading) return;
 
@@ -179,6 +260,11 @@ class _DirectSalePageState extends State<DirectSalePage> {
       if (_saleItemsMap.isEmpty) {
         isValid = false;
         AppSnackBar.showError(context, message: 'Adicione pelo menos um produto à venda.');
+      }
+    } else if (_currentStep == 2) {
+      if (_currentUserRole == 'admin' && _selectedSalespersonForSale == null) {
+        isValid = false;
+        AppSnackBar.showError(context, message: 'Como administrador, você deve selecionar um vendedor.');
       }
     }
 
@@ -249,11 +335,6 @@ class _DirectSalePageState extends State<DirectSalePage> {
             )
         ],
       ),
-      floatingActionButton: _isLoading ? null : FloatingActionButton.extended(
-        onPressed: _handleNextStep,
-        label: Text(_currentStep == 2 ? 'FINALIZAR VENDA' : 'PRÓXIMO PASSO'),
-        icon: Icon(_currentStep == 2 ? Icons.check_circle_outline : Icons.arrow_forward),
-      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Stepper(
@@ -261,47 +342,10 @@ class _DirectSalePageState extends State<DirectSalePage> {
         currentStep: _currentStep,
         onStepTapped: (step) => setState(() => _currentStep = step),
         controlsBuilder: (context, details) {
-          return Padding(
-            padding: const EdgeInsets.only(top: 16.0),
-            child: Row(
-              children: [
-                ElevatedButton(
-                  onPressed: _isLoading ? null : details.onStepContinue,
-                  child: _isLoading && _currentStep == 2
-                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2,))
-                      : Text(_currentStep == 2 ? 'FINALIZAR' : 'PRÓXIMO'),
-                ),
-                if (_currentStep > 0)
-                  TextButton(
-                    onPressed: _isLoading ? null : details.onStepCancel,
-                    child: const Text('VOLTAR'),
-                  ),
-              ],
-            ),
-          );
+          // Os controles do Stepper agora são o FloatingActionButton
+          return Container();
         },
-        onStepContinue: () {
-          if (_isLoading) return;
-          bool isValid = true;
-          if (_currentStep == 0) {
-            if (_selectedClient == null || !_clientFormKey.currentState!.validate()) {
-              isValid = false;
-              AppSnackBar.showError(context, message: 'Selecione um cliente e defina a forma de pagamento.');
-            }
-          }
-          if (_currentStep == 1 && _saleItemsMap.isEmpty) {
-            isValid = false;
-            AppSnackBar.showError(context, message: 'Adicione pelo menos um produto à venda.');
-          }
-
-          if (isValid) {
-            if (_currentStep < 2) {
-              setState(() => _currentStep += 1);
-            } else {
-              _finalizeSale();
-            }
-          }
-        },
+        onStepContinue: _handleNextStep,
         onStepCancel: () {
           if (_isLoading) return;
           if (_currentStep > 0) {
@@ -314,9 +358,19 @@ class _DirectSalePageState extends State<DirectSalePage> {
           Step(title: const Text('3. Revisar e Finalizar'), content: _buildFinalizeStep(), isActive: _currentStep >= 2),
         ],
       ),
+      floatingActionButton: _isLoading
+          ? null
+          : FloatingActionButton.extended(
+        onPressed: _handleNextStep,
+        label: Text(_currentStep == 2 ? 'FINALIZAR VENDA' : 'PRÓXIMO PASSO'),
+        icon: _isLoading && _currentStep == 2
+            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2,))
+            : Icon(_currentStep == 2 ? Icons.check_circle_outline : Icons.arrow_forward),
+      ),
     );
   }
 
+  // ... (widgets _buildClientStep e _buildProductsStep permanecem os mesmos) ...
   Widget _buildClientStep() {
     return Form(
       key: _clientFormKey,
@@ -333,14 +387,38 @@ class _DirectSalePageState extends State<DirectSalePage> {
           const SizedBox(height: 10),
           if (_selectedClient == null)
             Autocomplete<Client>(
-              displayStringForOption: (client) => client.companyName,
-              fieldViewBuilder: (context, ctrl, focusNode, onSubmitted) => TextFormField(controller: ctrl, focusNode: focusNode, decoration: const InputDecoration(labelText: 'Pesquisar Cliente...')),
-              optionsBuilder: (textEditingValue) async {
-                if (textEditingValue.text.isEmpty) return const Iterable.empty();
-                final snapshot = await FirebaseFirestore.instance.collection('institutions').doc(_institutionId!).collection('clients').where('companyName', isGreaterThanOrEqualTo: textEditingValue.text).where('companyName', isLessThanOrEqualTo: '${textEditingValue.text}\uf8ff').get();
-                return snapshot.docs.map((doc) => Client.fromFirestore(doc as DocumentSnapshot<Map<String, dynamic>>));
+              displayStringForOption: (client) => '${client.companyName} (${client.city})',
+              fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
+                return TextFormField(
+                  controller: textEditingController,
+                  focusNode: focusNode,
+                  onFieldSubmitted: (_) => onFieldSubmitted(),
+                  decoration: const InputDecoration(labelText: 'Pesquisar Cliente...'),
+                );
               },
-              onSelected: _onClientSelected,
+              optionsBuilder: (textEditingValue) async {
+                final query = textEditingValue.text.toLowerCase();
+                if (query.isEmpty) return const Iterable.empty();
+
+                final clientsRef = FirebaseFirestore.instance
+                    .collection('institutions').doc(_institutionId!)
+                    .collection('clients');
+
+                final nameSnapshot = await clientsRef
+                    .where('companyName', isGreaterThanOrEqualTo: textEditingValue.text)
+                    .where('companyName', isLessThanOrEqualTo: '${textEditingValue.text}\uf8ff')
+                    .get();
+
+                final citySnapshot = await clientsRef
+                    .where('city', isGreaterThanOrEqualTo: textEditingValue.text)
+                    .where('city', isLessThanOrEqualTo: '${textEditingValue.text}\uf8ff')
+                    .get();
+
+                final allDocs = {...nameSnapshot.docs, ...citySnapshot.docs}.toList();
+
+                return allDocs.map((doc) => Client.fromFirestore(doc as DocumentSnapshot<Map<String, dynamic>>));
+              },
+              onSelected: (client) => _onClientSelected(client),
             ),
           const SizedBox(height: 10),
           SwitchListTile(title: const Text('Cliente novo?'), value: _newClient, onChanged: (val) => setState(() => _newClient = val)),
@@ -367,7 +445,7 @@ class _DirectSalePageState extends State<DirectSalePage> {
   Widget _buildProductsStep() {
     return Column(
       children: [
-        SizedBox(height: 8,),
+        const SizedBox(height: 8,),
         TextField(controller: _productSearchController, decoration: const InputDecoration(labelText: 'Pesquisar Produto...', prefixIcon: Icon(Icons.search)), onChanged: _filterProducts),
         const SizedBox(height: 10),
         ListView.builder(
@@ -394,6 +472,27 @@ class _DirectSalePageState extends State<DirectSalePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const SizedBox(height: 10),
+        // ✨ SELETOR DE VENDEDOR PARA ADMINS
+        if (_currentUserRole == 'admin') ...[
+          DropdownButtonFormField<UserModel>(
+            value: _selectedSalespersonForSale,
+            decoration: const InputDecoration(labelText: 'Atribuir Venda a', border: OutlineInputBorder()),
+            items: _salespeopleList.map((UserModel salesperson) {
+              return DropdownMenuItem<UserModel>(
+                value: salesperson,
+                child: Text(salesperson.fullName),
+              );
+            }).toList(),
+            onChanged: (UserModel? newValue) {
+              setState(() {
+                _selectedSalespersonForSale = newValue;
+              });
+            },
+            validator: (value) => value == null ? 'Selecione um vendedor' : null,
+          ),
+          const SizedBox(height: 16),
+        ],
         SwitchListTile(title: const Text('Emitir Nota Fiscal?'), value: _withInvoice, onChanged: (val) => setState(() => _withInvoice = val)),
         TextFormField(controller: _observationsController, decoration: const InputDecoration(labelText: 'Observações (Opcional)'), maxLines: 3),
       ],
@@ -401,6 +500,7 @@ class _DirectSalePageState extends State<DirectSalePage> {
   }
 }
 
+// ... (Widget ProductSaleItem permanece o mesmo)
 class ProductSaleItem extends StatefulWidget {
   final Product product;
   final SaleItem? initialItem;
@@ -424,6 +524,17 @@ class _ProductSaleItemState extends State<ProductSaleItem> {
   }
 
   @override
+  void didUpdateWidget(covariant ProductSaleItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Garante que o estado do checkbox se mantenha ao pesquisar
+    if(widget.initialItem != null && !_isSelected) {
+      setState(() {
+        _isSelected = true;
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _quantityController.dispose();
     _priceController.dispose();
@@ -439,7 +550,7 @@ class _ProductSaleItemState extends State<ProductSaleItem> {
   @override
   Widget build(BuildContext context) {
     return Card(
-      color: _isSelected ? Theme.of(context).colorScheme.primary.withOpacity(0) : null,
+      color: _isSelected ? Theme.of(context).colorScheme.primary.withOpacity(0.1) : null,
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4.0),
