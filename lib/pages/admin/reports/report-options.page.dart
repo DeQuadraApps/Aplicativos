@@ -15,13 +15,25 @@ class ReportOptionsPage extends StatefulWidget {
 
 class _ReportOptionsPageState extends State<ReportOptionsPage> {
   List<UserModel> _salespeople = [];
-  String? _selectedSalespersonId; // Pode ser 'all' ou o ID de um vendedor
+  String? _selectedSalespersonId;
   bool _isLoading = true;
+
+  // NOVOS ESTADOS PARA MÊS E ANO
+  int? _selectedMonth;
+  int? _selectedYear;
+  final List<String> _months = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
+  final List<int> _years = List<int>.generate(5, (index) => DateTime.now().year - index); // Últimos 5 anos
 
   @override
   void initState() {
     super.initState();
     _fetchSalespeople();
+    // INICIALIZAR COM O MÊS E ANO ATUAIS
+    _selectedMonth = DateTime.now().month;
+    _selectedYear = DateTime.now().year;
   }
 
   Future<void> _fetchSalespeople() async {
@@ -40,9 +52,9 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
   }
 
   void _generateReport() {
-    if (_selectedSalespersonId == null) {
+    if (_selectedSalespersonId == null || _selectedMonth == null || _selectedYear == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor, selecione uma opção.'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('Por favor, selecione todas as opções.'), backgroundColor: Colors.red),
       );
       return;
     }
@@ -52,7 +64,10 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
       MaterialPageRoute(
         builder: (context) => ReportViewPage(
           institutionId: widget.institutionId,
-          salespersonId: _selectedSalespersonId!, // 'all' ou um ID específico
+          salespersonId: _selectedSalespersonId!,
+          // ENVIAR MÊS E ANO PARA A PRÓXIMA TELA
+          selectedMonth: _selectedMonth!,
+          selectedYear: _selectedYear!,
         ),
       ),
     );
@@ -69,6 +84,7 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // SELETOR DE VENDEDOR (sem alterações)
             DropdownButtonFormField<String>(
               value: _selectedSalespersonId,
               hint: const Text('Selecione o Vendedor'),
@@ -92,8 +108,52 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
               },
               decoration: const InputDecoration(border: OutlineInputBorder()),
             ),
+            const SizedBox(height: 16),
+
+            // NOVOS SELETORES DE MÊS E ANO
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    value: _selectedMonth,
+                    hint: const Text('Mês'),
+                    items: List.generate(12, (index) {
+                      return DropdownMenuItem<int>(
+                        value: index + 1,
+                        child: Text(_months[index]),
+                      );
+                    }),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedMonth = value;
+                      });
+                    },
+                    decoration: const InputDecoration(border: OutlineInputBorder()),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    value: _selectedYear,
+                    hint: const Text('Ano'),
+                    items: _years.map((year) {
+                      return DropdownMenuItem<int>(
+                        value: year,
+                        child: Text(year.toString()),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedYear = value;
+                      });
+                    },
+                    decoration: const InputDecoration(border: OutlineInputBorder()),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 24),
-            // Futuramente, pode adicionar um seletor de data aqui
+
             ElevatedButton.icon(
               onPressed: _generateReport,
               icon: const Icon(Icons.picture_as_pdf),

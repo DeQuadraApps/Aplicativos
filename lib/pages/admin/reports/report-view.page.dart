@@ -11,11 +11,17 @@ import 'package:quadra_vendas/services/pdf-report-service.dart';
 class ReportViewPage extends StatefulWidget {
   final String institutionId;
   final String salespersonId;
+  // NOVOS PARÂMETROS
+  final int selectedMonth;
+  final int selectedYear;
 
   const ReportViewPage({
     super.key,
     required this.institutionId,
     required this.salespersonId,
+    // ADICIONAR AO CONSTRUTOR
+    required this.selectedMonth,
+    required this.selectedYear,
   });
 
   @override
@@ -34,15 +40,27 @@ class _ReportViewPageState extends State<ReportViewPage> {
     _reportFuture = _fetchAndProcessReportData();
   }
 
+  // FUNÇÃO PARA OBTER NOME DO MÊS
+  String _getMonthName(int month) {
+    const months = [
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+    ];
+    return months[month - 1];
+  }
+
   Future<List<ReportData>> _fetchAndProcessReportData() async {
     List<UserModel> salespeopleToProcess = [];
 
-    // Busca o nome da instituição
     final instDoc = await FirebaseFirestore.instance.collection('institutions').doc(widget.institutionId).get();
     _institutionName = instDoc.data()?['name'] ?? 'Relatório';
 
+    // AJUSTAR TÍTULO DO RELATÓRIO
+    final monthName = _getMonthName(widget.selectedMonth);
+    final year = widget.selectedYear;
+
     if (widget.salespersonId == 'all') {
-      _reportTitle = 'Relatório Geral de Vendas';
+      _reportTitle = 'Relatório Geral de Vendas - $monthName/$year';
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .where('institutionId', isEqualTo: widget.institutionId)
@@ -52,19 +70,18 @@ class _ReportViewPageState extends State<ReportViewPage> {
     } else {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(widget.salespersonId).get();
       final user = UserModel.fromFirestore(userDoc);
-      _reportTitle = 'Relatório de Vendas - ${user.fullName}';
+      _reportTitle = 'Relatório de Vendas - ${user.fullName} - $monthName/$year';
       salespeopleToProcess.add(user);
     }
 
     List<ReportData> processedData = [];
     double grandTotalTemp = 0;
 
-    final now = DateTime.now();
-    final startOfMonth = DateTime(now.year, now.month, 1);
-    final endOfMonth = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
+    // A LÓGICA DE DATAS AGORA USA OS PARÂMETROS DA WIDGET
+    final startOfMonth = DateTime(widget.selectedYear, widget.selectedMonth, 1);
+    final endOfMonth = DateTime(widget.selectedYear, widget.selectedMonth + 1, 0, 23, 59, 59);
 
     for (var salesperson in salespeopleToProcess) {
-      // 1. Busca Clientes
       final clientsSnapshot = await FirebaseFirestore.instance
           .collection('institutions').doc(widget.institutionId)
           .collection('clients')
@@ -72,7 +89,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
           .get();
       final clients = clientsSnapshot.docs.map((doc) => Client.fromFirestore(doc)).toList();
 
-      // 2. Busca Vendas do Mês
+      // A CONSULTA DE VENDAS AGORA USA O INTERVALO DE DATAS DINÂMICO
       final salesSnapshot = await FirebaseFirestore.instance
           .collection('institutions').doc(widget.institutionId)
           .collection('sales')
@@ -85,7 +102,6 @@ class _ReportViewPageState extends State<ReportViewPage> {
       final totalSales = sales.fold(0.0, (sum, sale) => sum + sale.totalAmount);
       grandTotalTemp += totalSales;
 
-      // 3. Calcula Item Mais Vendido
       Map<String, int> itemCounts = {};
       for (var sale in sales) {
         for (var item in sale.items) {
@@ -109,8 +125,10 @@ class _ReportViewPageState extends State<ReportViewPage> {
     return processedData;
   }
 
+  // ... O RESTO DA CLASSE (build, _buildReportSection) PERMANECE O MESMO
   @override
   Widget build(BuildContext context) {
+    // Nenhuma alteração necessária aqui
     return Scaffold(
       appBar: AppBar(
         title: Text(_reportTitle),
@@ -179,6 +197,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
   }
 
   Widget _buildReportSection(ReportData data, NumberFormat currencyFormatter) {
+    // Nenhuma alteração necessária aqui
     return Padding(
       padding: const EdgeInsets.only(bottom: 24.0),
       child: Column(

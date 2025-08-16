@@ -9,6 +9,8 @@ class CustomInputField extends StatefulWidget {
   final String? Function(String?)? validator;
   final bool isPassword;
   final TextInputType keyboardType;
+  final TextInputAction? textInputAction;
+  final void Function(String)? onFieldSubmitted;
 
   const CustomInputField({
     super.key,
@@ -17,6 +19,8 @@ class CustomInputField extends StatefulWidget {
     this.validator,
     this.isPassword = false,
     this.keyboardType = TextInputType.text,
+    this.textInputAction,
+    this.onFieldSubmitted,
   });
 
   @override
@@ -62,6 +66,8 @@ class _CustomInputFieldState extends State<CustomInputField> {
       keyboardType: widget.keyboardType,
       validator: widget.validator,
       style: Theme.of(context).textTheme.bodyLarge,
+      textInputAction: widget.textInputAction,
+      onFieldSubmitted: widget.onFieldSubmitted,
     );
   }
 }

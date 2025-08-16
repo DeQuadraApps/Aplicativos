@@ -14,6 +14,7 @@ class Client {
   final String paymentMethod;
   final String contactName;
   final String salespersonId;
+  final String clientType;
 
   Client({
     this.id,
@@ -29,6 +30,7 @@ class Client {
     required this.paymentMethod,
     required this.contactName,
     required this.salespersonId,
+    this.clientType = 'PJ',
   });
 
   factory Client.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -47,6 +49,7 @@ class Client {
       paymentMethod: data['paymentMethod'] ?? '',
       contactName: data['contactName'] ?? '',
       salespersonId: data['salespersonId'] ?? '',
+      clientType: data['clientType'] ?? 'PJ',
     );
   }
 
@@ -64,6 +67,7 @@ class Client {
       'paymentMethod': paymentMethod,
       'contactName': contactName,
       'salespersonId': salespersonId,
+      'clientType': clientType,
     };
   }
 
@@ -81,6 +85,7 @@ class Client {
     String? paymentMethod,
     String? contactName,
     String? salespersonId,
+    String? clientType,
   }) {
     return Client(
       id: id ?? this.id,
@@ -96,6 +101,7 @@ class Client {
       paymentMethod: paymentMethod ?? this.paymentMethod,
       contactName: contactName ?? this.contactName,
       salespersonId: salespersonId ?? this.salespersonId,
+      clientType: clientType ?? this.clientType
     );
   }
 }

@@ -1,3 +1,4 @@
+// lib/pages/client/add_edit_client_page.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,8 @@ import 'package:quadra_vendas/models/client.model.dart';
 import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/services/cnpj.service.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
+
+enum ClientType { pj, pf }
 
 class AddEditClientPage extends StatefulWidget {
   final String institutionId;
@@ -28,10 +31,9 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
   final _formKeyStep1 = GlobalKey<FormState>();
   final _formKeyStep2 = GlobalKey<FormState>();
 
-  // ... Controladores ...
-  final _companyNameCtrl = TextEditingController();
-  final _cnpjCtrl = TextEditingController();
-  final _stateRegistrationCtrl = TextEditingController();
+  final _nameCtrl = TextEditingController();
+  final _documentCtrl = TextEditingController();
+  final _secondaryDocumentCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
   final _districtCtrl = TextEditingController();
@@ -41,38 +43,37 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
   final _paymentMethodCtrl = TextEditingController();
   final _contactNameCtrl = TextEditingController();
 
-  // ... Máscaras ...
   final _cnpjMask = MaskTextInputFormatter(mask: '##.###.###/####-##');
+  final _cpfMask = MaskTextInputFormatter(mask: '###.###.###-##');
   final _phoneMask = MaskTextInputFormatter(mask: '(##) #####-####');
 
-  // ... Estado da UI ...
   bool _isLoading = false;
   int _currentPage = 0;
   bool _isLoadingInitialData = true;
-  bool _isFetchingCnpj = false; // ✨ 2. NOVO ESTADO PARA O CARREGAMENTO DO CNPJ
+  bool _isFetchingCnpj = false;
+  // ✨ 1. NOVO ESTADO PARA CONTROLAR A VERIFICAÇÃO DO DOCUMENTO
+  bool _isCheckingDocument = false;
+  bool _isDocumentDuplicate = false;
 
-  // ... Estado dos Dados ...
   List<UserModel> _salespeople = [];
   String? _selectedSalespersonId;
   bool _isAdmin = false;
+  ClientType _selectedClientType = ClientType.pj;
 
   @override
   void initState() {
     super.initState();
     _loadInitialData();
-    // ✨ 3. ADICIONAR UM OUVINTE AO CONTROLLER DO CNPJ
-    _cnpjCtrl.addListener(_onCnpjChanged);
+    _documentCtrl.addListener(_onDocumentChanged);
   }
 
   @override
   void dispose() {
-    // ✨ 4. REMOVER O OUVINTE NO DISPOSE
-    _cnpjCtrl.removeListener(_onCnpjChanged);
+    _documentCtrl.removeListener(_onDocumentChanged);
     _pageController.dispose();
-    // ... outros controllers ...
-    _companyNameCtrl.dispose();
-    _cnpjCtrl.dispose();
-    _stateRegistrationCtrl.dispose();
+    _nameCtrl.dispose();
+    _documentCtrl.dispose();
+    _secondaryDocumentCtrl.dispose();
     _addressCtrl.dispose();
     _cityCtrl.dispose();
     _districtCtrl.dispose();
@@ -84,37 +85,72 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
     super.dispose();
   }
 
-  // ✨ 5. FUNÇÃO QUE É CHAMADA QUANDO O CNPJ MUDA
-  Future<void> _onCnpjChanged() async {
-    final cleanCnpj = _cnpjMask.getUnmaskedText();
-    // Só faz a chamada se o CNPJ tiver 14 dígitos
-    if (cleanCnpj.length == 14) {
-      setState(() => _isFetchingCnpj = true);
-      try {
-        final cnpjData = await CnpjService().fetchCnpjData(cleanCnpj);
+  Future<void> _onDocumentChanged() async {
+    if (_isDocumentDuplicate) {
+      setState(() {
+        _isDocumentDuplicate = false;
+      });
+    }
+
+    final isPj = _selectedClientType == ClientType.pj;
+    final mask = isPj ? _cnpjMask : _cpfMask;
+    final cleanDocument = mask.getUnmaskedText();
+    final requiredLength = isPj ? 14 : 11;
+
+    if (cleanDocument.length != requiredLength) return;
+
+    setState(() => _isCheckingDocument = true);
+    bool isDuplicate = false; // Variável de controle
+
+    try {
+      // --- ETAPA 1: Validação de duplicidade (sempre ocorre primeiro) ---
+      final query = await FirebaseFirestore.instance
+          .collection('institutions').doc(widget.institutionId)
+          .collection('clients')
+          .where('cnpj', isEqualTo: _documentCtrl.text)
+          .limit(1)
+          .get();
+
+      if (query.docs.isNotEmpty) {
+        isDuplicate = true; // Marca como duplicado
+        if (mounted) {
+          setState(() {
+            _isDocumentDuplicate = true;
+          });
+          AppSnackBar.showError(context, message: 'Este documento já está cadastrado!');
+        }
+      }
+
+      // --- ETAPA 2: Autocomplete (SÓ ocorre se NÃO for duplicado e for PJ) ---
+      if (!isDuplicate && isPj) {
+        setState(() => _isFetchingCnpj = true); // Ativa o loading da API
+        final cnpjData = await CnpjService().fetchCnpjData(cleanDocument);
         if (cnpjData != null && mounted) {
-          // Preenche os controllers com os dados da API
-          _companyNameCtrl.text = cnpjData['razao_social'] ?? '';
+          _nameCtrl.text = cnpjData['razao_social'] ?? '';
           _addressCtrl.text = cnpjData['logradouro'] ?? '';
           _cityCtrl.text = cnpjData['municipio'] ?? '';
           _districtCtrl.text = cnpjData['bairro'] ?? '';
           _houseNumberCtrl.text = cnpjData['numero'] ?? '';
           _phoneCtrl.text = _phoneMask.maskText(cnpjData['ddd_telefone_1'] ?? '');
           _emailCtrl.text = cnpjData['email'] ?? '';
-
           AppSnackBar.showSuccess(context, message: 'Dados do CNPJ preenchidos!');
         } else if (mounted) {
+          // Se a API não retornar dados, informa o usuário
           AppSnackBar.showError(context, message: 'CNPJ não encontrado ou inválido.');
         }
-      } catch (e) {
-        if(mounted) AppSnackBar.showError(context, message: 'Erro ao consultar CNPJ.');
-      } finally {
-        if(mounted) setState(() => _isFetchingCnpj = false);
+      }
+    } catch (e) {
+      if (mounted) AppSnackBar.showError(context, message: 'Erro ao verificar documento.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingDocument = false;
+          _isFetchingCnpj = false;
+        });
       }
     }
   }
 
-  // ... (funções _loadInitialData e _saveClient permanecem as mesmas) ...
   Future<void> _loadInitialData() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
@@ -131,11 +167,9 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
         final snapshot = await FirebaseFirestore.instance
             .collection('users')
             .where('institutionId', isEqualTo: widget.institutionId)
-        // Apenas vendedores, não outros admins
             .where('role', whereIn: ['salesperson', 'employee'])
             .get();
-
-        if(mounted){
+        if (mounted) {
           setState(() {
             _salespeople = snapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList();
           });
@@ -143,9 +177,9 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
       }
 
       if (widget.client != null) {
-        _companyNameCtrl.text = widget.client!.companyName;
-        _cnpjCtrl.text = widget.client!.cnpj;
-        _stateRegistrationCtrl.text = widget.client!.stateRegistration ?? '';
+        _nameCtrl.text = widget.client!.companyName;
+        _documentCtrl.text = widget.client!.cnpj;
+        _secondaryDocumentCtrl.text = widget.client!.stateRegistration ?? '';
         _addressCtrl.text = widget.client!.address;
         _cityCtrl.text = widget.client!.city;
         _districtCtrl.text = widget.client!.district;
@@ -155,6 +189,7 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
         _paymentMethodCtrl.text = widget.client!.paymentMethod;
         _contactNameCtrl.text = widget.client!.contactName;
         _selectedSalespersonId = widget.client!.salespersonId;
+        _selectedClientType = widget.client!.clientType == 'PF' ? ClientType.pf : ClientType.pj;
       } else if (widget.salespersonId != null) {
         _selectedSalespersonId = widget.salespersonId;
       }
@@ -166,12 +201,16 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
   }
 
   Future<void> _saveClient() async {
-    setState(() => _isLoading = true);
+    if (_isDocumentDuplicate) {
+      AppSnackBar.showError(context, message: 'Não é possível salvar. O documento informado já está cadastrado.');
+      return;
+    }
 
+    setState(() => _isLoading = true);
     String salespersonToAssign;
 
-    if(_isAdmin) {
-      if(_selectedSalespersonId == null) {
+    if (_isAdmin) {
+      if (_selectedSalespersonId == null) {
         AppSnackBar.showError(context, message: 'Por favor, selecione um vendedor para vincular a este cliente.');
         setState(() => _isLoading = false);
         return;
@@ -181,25 +220,14 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
       salespersonToAssign = FirebaseAuth.instance.currentUser!.uid;
     }
 
-    final cnpj = _cnpjCtrl.text.trim();
-
-    final query = await FirebaseFirestore.instance
-        .collection('institutions').doc(widget.institutionId)
-        .collection('clients')
-        .where('cnpj', isEqualTo: cnpj)
-        .limit(1).get();
-
-    if(query.docs.isNotEmpty && query.docs.first.id != widget.client?.id) {
-      AppSnackBar.showError(context, message: 'Este CNPJ já está cadastrado.');
-      setState(() => _isLoading = false);
-      return;
-    }
+    // ✨ 3. REMOVIDA A VERIFICAÇÃO DE DUPLICIDADE DAQUI
+    // A verificação agora é feita em tempo real no _onDocumentChanged
 
     Client clientToSave = Client(
       id: widget.client?.id,
-      companyName: _companyNameCtrl.text.trim(),
-      cnpj: cnpj,
-      stateRegistration: _stateRegistrationCtrl.text.trim(),
+      companyName: _nameCtrl.text.trim(),
+      cnpj: _documentCtrl.text.trim(),
+      stateRegistration: _secondaryDocumentCtrl.text.trim(),
       address: _addressCtrl.text.trim(),
       city: _cityCtrl.text.trim(),
       district: _districtCtrl.text.trim(),
@@ -209,6 +237,7 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
       paymentMethod: _paymentMethodCtrl.text.trim(),
       contactName: _contactNameCtrl.text.trim(),
       salespersonId: salespersonToAssign,
+      clientType: _selectedClientType == ClientType.pf ? 'PF' : 'PJ',
     );
 
     try {
@@ -218,7 +247,6 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
 
       if (widget.client == null) {
         final docRef = await collectionRef.add(clientToSave.toFirestore());
-        // Atualiza o objeto local com o ID gerado para poder retorná-lo
         clientToSave = clientToSave.copyWith(id: docRef.id);
       } else {
         await collectionRef.doc(clientToSave.id).update(clientToSave.toFirestore());
@@ -235,10 +263,8 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
-    // ... (build principal permanece o mesmo) ...
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       child: Scaffold(
@@ -256,10 +282,16 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              if (_currentPage > 0) TextButton(onPressed: () => _pageController.previousPage(duration: const Duration(milliseconds: 300), curve: Curves.ease), child: const Text('Voltar')),
+              if (_currentPage > 0)
+                TextButton(
+                  onPressed: () => _pageController.previousPage(duration: const Duration(milliseconds: 300), curve: Curves.ease),
+                  child: const Text('Voltar'),
+                ),
               const Spacer(),
               ElevatedButton(
-                onPressed: _isLoading ? null : () {
+                onPressed: (_isLoading || _isDocumentDuplicate)
+                    ? null
+                    : () {
                   if (_currentPage == 0) {
                     if (_formKeyStep1.currentState!.validate()) {
                       _pageController.nextPage(duration: const Duration(milliseconds: 300), curve: Curves.ease);
@@ -289,7 +321,6 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ... (Dropdown do admin permanece o mesmo) ...
             if (_isAdmin && widget.salespersonId == null) ...[
               Text('Vendedor Responsável', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
@@ -313,31 +344,71 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
               ),
               const SizedBox(height: 24),
             ],
-
-            Text('Dados da Empresa', style: Theme.of(context).textTheme.titleLarge),
+            Text('Tipo de Cadastro', style: Theme.of(context).textTheme.titleMedium),
+            Row(
+              children: [
+                Expanded(
+                  child: RadioListTile<ClientType>(
+                    title: const Text('Pessoa Jurídica'),
+                    value: ClientType.pj,
+                    groupValue: _selectedClientType,
+                    onChanged: (ClientType? value) {
+                      if (_isLoadingInitialData || _isCheckingDocument) return;
+                      setState(() {
+                        _selectedClientType = value!;
+                        _documentCtrl.clear();
+                        _nameCtrl.clear();
+                      });
+                    },
+                  ),
+                ),
+                Expanded(
+                  child: RadioListTile<ClientType>(
+                    title: const Text('Pessoa Física'),
+                    value: ClientType.pf,
+                    groupValue: _selectedClientType,
+                    onChanged: (ClientType? value) {
+                      if (_isLoadingInitialData || _isCheckingDocument) return;
+                      setState(() {
+                        _selectedClientType = value!;
+                        _documentCtrl.clear();
+                        _nameCtrl.clear();
+                      });
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text('Dados Principais', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 16),
             TextFormField(
-              controller: _cnpjCtrl,
+              controller: _documentCtrl,
               decoration: InputDecoration(
-                labelText: 'CNPJ',
-                suffixIcon: _isFetchingCnpj
+                labelText: _selectedClientType == ClientType.pj ? 'CNPJ' : 'CPF',
+                // ✨ 4. ATUALIZADO O SUFFIXICON PARA MOSTRAR O LOADING EM AMBAS AS OPERAÇÕES
+                suffixIcon: (_isCheckingDocument || _isFetchingCnpj)
                     ? const Padding(
                   padding: EdgeInsets.all(12.0),
-                  child: SizedBox(
-                      height: 10,
-                      width: 10,
-                      child: CircularProgressIndicator(strokeWidth: 2)),
+                  child: SizedBox(height: 10, width: 10, child: CircularProgressIndicator(strokeWidth: 2)),
                 )
                     : null,
               ),
-              inputFormatters: [_cnpjMask],
+              inputFormatters: [_selectedClientType == ClientType.pj ? _cnpjMask : _cpfMask],
+              validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null,
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _nameCtrl,
+              decoration: InputDecoration(labelText: _selectedClientType == ClientType.pj ? 'Razão Social' : 'Nome Completo'),
               validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null,
             ),
             const SizedBox(height: 16),
-            TextFormField(controller: _companyNameCtrl, decoration: const InputDecoration(labelText: 'Razão Social'), validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null),
-            // ✨ 6. ATUALIZAR O CAMPO DE CNPJ PARA MOSTRAR O ÍCONE DE CARREGAMENTO
-            const SizedBox(height: 16),
-            TextFormField(controller: _stateRegistrationCtrl, decoration: const InputDecoration(labelText: 'Inscrição Estadual (Opcional)')),
+            TextFormField(
+              controller: _secondaryDocumentCtrl,
+              decoration: InputDecoration(labelText: _selectedClientType == ClientType.pj ? 'Inscrição Estadual (Opcional)' : 'RG (Opcional)'),
+            ),
             const Divider(height: 48),
             Text('Endereço', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 16),
@@ -354,7 +425,6 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
     );
   }
 
-  // ... (buildStep2 permanece o mesmo)
   Widget _buildStep2() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),

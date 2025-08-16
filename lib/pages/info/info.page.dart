@@ -33,7 +33,7 @@ class InfoPage extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('Versão'),
-            subtitle: const Text('2.0.0'), // Pode atualizar conforme desenvolve
+            subtitle: const Text('2.2.1'), // Pode atualizar conforme desenvolve
           ),
         ],
       ),

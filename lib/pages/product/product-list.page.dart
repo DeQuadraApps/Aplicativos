@@ -230,7 +230,7 @@ class _ProductsListPageState extends State<ProductsListPage> {
             ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: isAdmin ? FloatingActionButton(
         onPressed: () {
           if (_institutionId == null) return;
           if (isAdmin) {
@@ -240,8 +240,8 @@ class _ProductsListPageState extends State<ProductsListPage> {
           }
         },
         child: const Icon(Icons.add),
-        tooltip: isAdmin ? 'Nova Categoria' : 'Adicionar Produto Pessoal',
-      ),
+        tooltip: 'Nova Categoria',
+      ) : null,
       body: _currentUserData == null
           ? const Center(child: CircularProgressIndicator())
           : StreamBuilder<QuerySnapshot>(
@@ -336,7 +336,7 @@ class _ProductsListPageState extends State<ProductsListPage> {
                       );
                     },
                   ),
-                  // O botão de adicionar produto continua visível para todos dentro da categoria
+                  if(isAdmin)
                   Padding(
                     padding: const EdgeInsets.only(right: 16.0, bottom: 8.0),
                     child: Align(
