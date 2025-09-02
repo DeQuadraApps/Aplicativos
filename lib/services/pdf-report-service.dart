@@ -6,7 +6,6 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:quadra_vendas/models/client.model.dart';
 
-// Estrutura de dados para o relatório
 class ReportData {
   final String salespersonName;
   final List<Client> clients;
@@ -26,99 +25,237 @@ class PdfReportService {
   final String institutionName;
   final String reportTitle;
   final double grandTotal;
+  final String reportType;
 
   PdfReportService({
     required this.reportDataList,
     required this.institutionName,
     required this.reportTitle,
     required this.grandTotal,
+    required this.reportType,
   });
 
   Future<Uint8List> generatePdf() async {
     final pdf = pw.Document();
     final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
-    final fontData = await rootBundle.load("assets/fonts/Roboto-Regular.ttf");
-    final boldFontData = await rootBundle.load("assets/fonts/Roboto-Bold.ttf");
-    final ttf = pw.Font.ttf(fontData);
-    final boldTtf = pw.Font.ttf(boldFontData);
+
+    final font = await rootBundle.load("assets/fonts/Roboto-Regular.ttf");
+    final boldFont = await rootBundle.load("assets/fonts/Roboto-Bold.ttf");
+    // =======================================================
+    // !! REMOVIDO: Carregamento do logoimage !!
+    // =======================================================
+    // final logoImage = pw.MemoryImage(
+    //   (await rootBundle.load('assets/images/logo.png')).buffer.asUint8List(),
+    // );
+
+    final theme = pw.ThemeData.withFont(
+      base: pw.Font.ttf(font),
+      bold: pw.Font.ttf(boldFont),
+    );
+
+    final bool showSales = reportType == 'complete' || reportType == 'sales_only';
+    final bool showClients = reportType == 'complete' || reportType == 'clients_only';
 
     pdf.addPage(
       pw.MultiPage(
-        theme: pw.ThemeData.withFont(base: ttf, bold: boldTtf),
+        theme: theme,
         pageFormat: PdfPageFormat.a4,
-        header: (context) => _buildHeader(),
-        build: (context) => [
-          ..._buildSalespersonSections(currencyFormatter),
-          pw.Divider(thickness: 2),
-          pw.SizedBox(height: 20),
-          _buildGrandTotal(currencyFormatter),
-        ],
+        // =======================================================
+        // !! REMOVIDO: Passagem do logoImage para o header !!
+        // =======================================================
+        header: (context) => _buildHeader(context),
+        footer: (context) => _buildFooter(context),
+        build: (context) => _buildReportBody(currencyFormatter, showSales, showClients),
       ),
     );
 
     return pdf.save();
   }
 
-  pw.Widget _buildHeader() {
+  List<pw.Widget> _buildReportBody(NumberFormat currencyFormatter, bool showSales, bool showClients) {
+    List<pw.Widget> widgets = [];
+
+    for (var data in reportDataList) {
+      widgets.add(
+        pw.Container(
+          padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: const pw.BoxDecoration(
+            color: PdfColors.blueGrey800,
+            borderRadius: pw.BorderRadius.all(pw.Radius.circular(4)),
+          ),
+          child: pw.Text(
+            data.salespersonName,
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16, color: PdfColors.white),
+          ),
+        ),
+      );
+      widgets.add(pw.SizedBox(height: 10));
+
+      if (showSales) {
+        widgets.add(_buildSalesInfo(data, currencyFormatter));
+      }
+
+      if (showClients) {
+        if (data.clients.isNotEmpty) {
+          widgets.add(_buildClientsTable(data));
+        } else {
+          widgets.add(pw.Text('Nenhum cliente associado.'));
+        }
+      }
+
+      widgets.add(pw.SizedBox(height: 25));
+    }
+
+    if (showSales) {
+      widgets.add(pw.SizedBox(height: 20));
+      widgets.add(_buildGrandTotal(currencyFormatter));
+    }
+
+    return widgets;
+  }
+
+  // =======================================================
+  // !! ATUALIZADO: _buildHeader sem o parâmetro logoImage e sem o widget Image !!
+  // =======================================================
+  pw.Widget _buildHeader(pw.Context context) {
+    return pw.Container(
+      margin: const pw.EdgeInsets.only(bottom: 20),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(institutionName, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 22)),
+              pw.SizedBox(height: 4),
+              pw.Text(reportTitle, style: pw.TextStyle(fontSize: 16, color: PdfColors.grey700)),
+              pw.SizedBox(height: 4),
+              pw.Text('Emitido em: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}'),
+            ],
+          ),
+          // =======================================================
+          // !! REMOVIDO: O widget pw.Image(logoImage) !!
+          // =======================================================
+          // pw.SizedBox(
+          //   height: 60,
+          //   width: 60,
+          //   child: pw.Image(logoImage),
+          // ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _buildFooter(pw.Context context) {
+    return pw.Container(
+        alignment: pw.Alignment.center,
+        margin: const pw.EdgeInsets.only(top: 10),
+        child: pw.Column(
+            children: [
+              pw.Divider(),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(institutionName, style: const pw.TextStyle(color: PdfColors.grey)),
+                  pw.Text('Página ${context.pageNumber} de ${context.pagesCount}',
+                      style: const pw.TextStyle(color: PdfColors.grey)),
+                ],
+              ),
+            ]
+        )
+    );
+  }
+
+  pw.Widget _buildSalesInfo(ReportData data, NumberFormat currencyFormatter) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Text(institutionName, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 24)),
-        pw.Text(reportTitle, style: pw.TextStyle(fontSize: 18, color: PdfColors.grey700)),
-        pw.Text('Data de Emissão: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}'),
-        pw.Divider(thickness: 2),
-        pw.SizedBox(height: 10),
+        pw.Text('Resumo de Vendas', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14, color: PdfColors.blueGrey600)),
+        pw.SizedBox(height: 5),
+        _buildInfoRow('Total de Vendas:', currencyFormatter.format(data.totalSales)),
+        _buildInfoRow('Item Mais Vendido:', data.topSellingItem),
+        pw.SizedBox(height: 15),
       ],
     );
   }
 
-  List<pw.Widget> _buildSalespersonSections(NumberFormat currencyFormatter) {
-    List<pw.Widget> sections = [];
-    for (var data in reportDataList) {
-      sections.add(
-          pw.Column(
+  pw.Widget _buildClientsTable(ReportData data) {
+    final Map<String, List<Client>> clientsByCity = {};
+    for (final client in data.clients) {
+      clientsByCity.putIfAbsent(client.city, () => []).add(client);
+    }
+
+    final sortedCities = clientsByCity.keys.toList()..sort();
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text('Relação de Clientes (${data.clients.length})', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14, color: PdfColors.blueGrey600)),
+        pw.SizedBox(height: 8),
+
+        ...sortedCities.map((city) {
+          final clientsInCity = clientsByCity[city]!;
+          return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Text(data.salespersonName, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16)),
-              pw.Divider(),
-              pw.SizedBox(height: 5),
-              _buildInfoRow('Total de Vendas:', currencyFormatter.format(data.totalSales)),
-              _buildInfoRow('Item Mais Vendido:', data.topSellingItem),
-              pw.SizedBox(height: 10),
-              pw.Text('Clientes:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              pw.SizedBox(height: 5),
-              ...data.clients.map((client) => pw.Text('- ${client.companyName} (${client.city})')).toList(),
-              pw.SizedBox(height: 25),
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                margin: const pw.EdgeInsets.only(top: 8, bottom: 4),
+                decoration: const pw.BoxDecoration(
+                  color: PdfColors.grey200,
+                  borderRadius: pw.BorderRadius.all(pw.Radius.circular(4)),
+                ),
+                child: pw.Text(city.toUpperCase(), style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.grey800)),
+              ),
+              ...clientsInCity.map(
+                    (client) => pw.Padding(
+                  padding: const pw.EdgeInsets.only(left: 12, bottom: 4),
+                  child: pw.Text('- ${client.companyName}'),
+                ),
+              ),
             ],
-          )
-      );
-    }
-    return sections;
+          );
+        }),
+      ],
+    );
   }
 
   pw.Widget _buildGrandTotal(NumberFormat currencyFormatter) {
     return pw.Align(
       alignment: pw.Alignment.centerRight,
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.end,
-        children: [
-          pw.Text('VALOR TOTAL DE VENDAS (GERAL):', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-          pw.Text(
-            currencyFormatter.format(grandTotal),
-            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 20),
-          ),
-        ],
+      child: pw.Container(
+        width: 250,
+        padding: const pw.EdgeInsets.all(10),
+        decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.blueGrey800),
+            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5))
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          children: [
+            pw.Text('TOTAL GERAL DE VENDAS', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey800)),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              currencyFormatter.format(grandTotal),
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 20),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   pw.Widget _buildInfoRow(String label, String value) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+      padding: const pw.EdgeInsets.symmetric(vertical: 3),
       child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
-          pw.SizedBox(width: 120, child: pw.Text(label, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-          pw.Text(value),
+          pw.Text(label, style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(width: 10),
+          pw.Expanded(child: pw.Text(value, textAlign: pw.TextAlign.right)),
         ],
       ),
     );

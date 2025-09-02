@@ -18,20 +18,26 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
   String? _selectedSalespersonId;
   bool _isLoading = true;
 
-  // NOVOS ESTADOS PARA MÊS E ANO
   int? _selectedMonth;
   int? _selectedYear;
   final List<String> _months = [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
     'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
   ];
-  final List<int> _years = List<int>.generate(5, (index) => DateTime.now().year - index); // Últimos 5 anos
+  final List<int> _years = List<int>.generate(5, (index) => DateTime.now().year - index);
+
+  // NOVO ESTADO E OPÇÕES PARA TIPO DE RELATÓRIO
+  String _selectedReportType = 'complete';
+  final Map<String, String> _reportTypes = {
+    'complete': 'Relatório Completo',
+    'sales_only': 'Relatório de Vendas',
+    'clients_only': 'Relatório de Clientes',
+  };
 
   @override
   void initState() {
     super.initState();
     _fetchSalespeople();
-    // INICIALIZAR COM O MÊS E ANO ATUAIS
     _selectedMonth = DateTime.now().month;
     _selectedYear = DateTime.now().year;
   }
@@ -65,9 +71,10 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
         builder: (context) => ReportViewPage(
           institutionId: widget.institutionId,
           salespersonId: _selectedSalespersonId!,
-          // ENVIAR MÊS E ANO PARA A PRÓXIMA TELA
           selectedMonth: _selectedMonth!,
           selectedYear: _selectedYear!,
+          // ENVIAR TIPO DE RELATÓRIO PARA A PRÓXIMA TELA
+          reportType: _selectedReportType,
         ),
       ),
     );
@@ -84,7 +91,29 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // SELETOR DE VENDEDOR (sem alterações)
+            // NOVO SELETOR DE TIPO DE RELATÓRIO
+            DropdownButtonFormField<String>(
+              value: _selectedReportType,
+              hint: const Text('Tipo de Relatório'),
+              isExpanded: true,
+              items: _reportTypes.entries.map((entry) {
+                return DropdownMenuItem<String>(
+                  value: entry.key,
+                  child: Text(entry.value),
+                );
+              }).toList(),
+              onChanged: (value) {
+                setState(() {
+                  _selectedReportType = value!;
+                });
+              },
+              decoration: const InputDecoration(
+                  labelText: 'Tipo de Relatório',
+                  border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 16),
+
+            // SELETOR DE VENDEDOR
             DropdownButtonFormField<String>(
               value: _selectedSalespersonId,
               hint: const Text('Selecione o Vendedor'),
@@ -106,11 +135,13 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
                   _selectedSalespersonId = value;
                 });
               },
-              decoration: const InputDecoration(border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                  labelText: 'Vendedor',
+                  border: OutlineInputBorder()),
             ),
             const SizedBox(height: 16),
 
-            // NOVOS SELETORES DE MÊS E ANO
+            // SELETORES DE MÊS E ANO
             Row(
               children: [
                 Expanded(
@@ -128,7 +159,9 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
                         _selectedMonth = value;
                       });
                     },
-                    decoration: const InputDecoration(border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                        labelText: 'Mês',
+                        border: OutlineInputBorder()),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -147,7 +180,9 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
                         _selectedYear = value;
                       });
                     },
-                    decoration: const InputDecoration(border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                        labelText: 'Ano',
+                        border: OutlineInputBorder()),
                   ),
                 ),
               ],
@@ -155,6 +190,10 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
             const SizedBox(height: 24),
 
             ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(fontSize: 16)
+              ),
               onPressed: _generateReport,
               icon: const Icon(Icons.picture_as_pdf),
               label: const Text('Gerar Relatório'),

@@ -11,17 +11,17 @@ import 'package:quadra_vendas/services/pdf-report-service.dart';
 class ReportViewPage extends StatefulWidget {
   final String institutionId;
   final String salespersonId;
-  // NOVOS PARÂMETROS
   final int selectedMonth;
   final int selectedYear;
+  final String reportType;
 
   const ReportViewPage({
     super.key,
     required this.institutionId,
     required this.salespersonId,
-    // ADICIONAR AO CONSTRUTOR
     required this.selectedMonth,
     required this.selectedYear,
+    required this.reportType,
   });
 
   @override
@@ -40,7 +40,6 @@ class _ReportViewPageState extends State<ReportViewPage> {
     _reportFuture = _fetchAndProcessReportData();
   }
 
-  // FUNÇÃO PARA OBTER NOME DO MÊS
   String _getMonthName(int month) {
     const months = [
       'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -51,16 +50,14 @@ class _ReportViewPageState extends State<ReportViewPage> {
 
   Future<List<ReportData>> _fetchAndProcessReportData() async {
     List<UserModel> salespeopleToProcess = [];
-
     final instDoc = await FirebaseFirestore.instance.collection('institutions').doc(widget.institutionId).get();
     _institutionName = instDoc.data()?['name'] ?? 'Relatório';
 
-    // AJUSTAR TÍTULO DO RELATÓRIO
     final monthName = _getMonthName(widget.selectedMonth);
     final year = widget.selectedYear;
 
     if (widget.salespersonId == 'all') {
-      _reportTitle = 'Relatório Geral de Vendas - $monthName/$year';
+      _reportTitle = 'Relatório Geral - $monthName/$year';
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .where('institutionId', isEqualTo: widget.institutionId)
@@ -70,47 +67,56 @@ class _ReportViewPageState extends State<ReportViewPage> {
     } else {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(widget.salespersonId).get();
       final user = UserModel.fromFirestore(userDoc);
-      _reportTitle = 'Relatório de Vendas - ${user.fullName} - $monthName/$year';
+      _reportTitle = 'Relatório de ${user.fullName} - $monthName/$year';
       salespeopleToProcess.add(user);
     }
 
     List<ReportData> processedData = [];
     double grandTotalTemp = 0;
 
-    // A LÓGICA DE DATAS AGORA USA OS PARÂMETROS DA WIDGET
     final startOfMonth = DateTime(widget.selectedYear, widget.selectedMonth, 1);
     final endOfMonth = DateTime(widget.selectedYear, widget.selectedMonth + 1, 0, 23, 59, 59);
 
+    final bool fetchClients = widget.reportType == 'complete' || widget.reportType == 'clients_only';
+    final bool fetchSales = widget.reportType == 'complete' || widget.reportType == 'sales_only';
+
     for (var salesperson in salespeopleToProcess) {
-      final clientsSnapshot = await FirebaseFirestore.instance
-          .collection('institutions').doc(widget.institutionId)
-          .collection('clients')
-          .where('salespersonId', isEqualTo: salesperson.id)
-          .get();
-      final clients = clientsSnapshot.docs.map((doc) => Client.fromFirestore(doc)).toList();
-
-      // A CONSULTA DE VENDAS AGORA USA O INTERVALO DE DATAS DINÂMICO
-      final salesSnapshot = await FirebaseFirestore.instance
-          .collection('institutions').doc(widget.institutionId)
-          .collection('sales')
-          .where('userId', isEqualTo: salesperson.id)
-          .where('saleDate', isGreaterThanOrEqualTo: startOfMonth)
-          .where('saleDate', isLessThanOrEqualTo: endOfMonth)
-          .get();
-
-      final sales = salesSnapshot.docs.map((doc) => Sale.fromFirestore(doc)).toList();
-      final totalSales = sales.fold(0.0, (sum, sale) => sum + sale.totalAmount);
-      grandTotalTemp += totalSales;
-
-      Map<String, int> itemCounts = {};
-      for (var sale in sales) {
-        for (var item in sale.items) {
-          itemCounts[item.product.name] = (itemCounts[item.product.name] ?? 0) + item.quantity;
-        }
+      List<Client> clients = [];
+      if (fetchClients) {
+        final clientsSnapshot = await FirebaseFirestore.instance
+            .collection('institutions').doc(widget.institutionId)
+            .collection('clients')
+            .where('salespersonId', isEqualTo: salesperson.id)
+            .get();
+        clients = clientsSnapshot.docs.map((doc) => Client.fromFirestore(doc)).toList();
       }
-      String topSellingItem = 'Nenhuma venda no mês';
-      if (itemCounts.isNotEmpty) {
-        topSellingItem = itemCounts.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+
+      double totalSales = 0;
+      String topSellingItem = 'N/A';
+      if (fetchSales) {
+        final salesSnapshot = await FirebaseFirestore.instance
+            .collection('institutions').doc(widget.institutionId)
+            .collection('sales')
+            .where('userId', isEqualTo: salesperson.id)
+            .where('saleDate', isGreaterThanOrEqualTo: startOfMonth)
+            .where('saleDate', isLessThanOrEqualTo: endOfMonth)
+            .get();
+
+        final sales = salesSnapshot.docs.map((doc) => Sale.fromFirestore(doc)).toList();
+        totalSales = sales.fold(0.0, (sum, sale) => sum + sale.totalAmount);
+        grandTotalTemp += totalSales;
+
+        Map<String, int> itemCounts = {};
+        for (var sale in sales) {
+          for (var item in sale.items) {
+            itemCounts[item.product.name] = (itemCounts[item.product.name] ?? 0) + item.quantity;
+          }
+        }
+        if (itemCounts.isNotEmpty) {
+          topSellingItem = itemCounts.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+        } else {
+          topSellingItem = 'Nenhuma venda no mês';
+        }
       }
 
       processedData.add(ReportData(
@@ -125,10 +131,8 @@ class _ReportViewPageState extends State<ReportViewPage> {
     return processedData;
   }
 
-  // ... O RESTO DA CLASSE (build, _buildReportSection) PERMANECE O MESMO
   @override
   Widget build(BuildContext context) {
-    // Nenhuma alteração necessária aqui
     return Scaffold(
       appBar: AppBar(
         title: Text(_reportTitle),
@@ -140,15 +144,58 @@ class _ReportViewPageState extends State<ReportViewPage> {
                 return IconButton(
                   icon: const Icon(Icons.picture_as_pdf),
                   tooltip: 'Exportar para PDF',
+                  // =======================================================
+                  // !! MUDANÇA AQUI: LÓGICA PARA EXIBIR O PROGRESSO !!
+                  // =======================================================
                   onPressed: () async {
-                    final pdfService = PdfReportService(
-                      reportDataList: snapshot.data!,
-                      institutionName: _institutionName,
-                      reportTitle: _reportTitle,
-                      grandTotal: _grandTotal,
+                    // Exibe a caixa de diálogo de progresso
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (BuildContext context) {
+                        return const Dialog(
+                          child: Padding(
+                            padding: EdgeInsets.all(20.0),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                CircularProgressIndicator(),
+                                SizedBox(width: 20),
+                                Text("Gerando PDF..."),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     );
-                    final pdfBytes = await pdfService.generatePdf();
-                    await Printing.layoutPdf(onLayout: (format) async => pdfBytes);
+
+                    try {
+                      // Gera o PDF (processo demorado)
+                      final pdfService = PdfReportService(
+                        reportDataList: snapshot.data!,
+                        institutionName: _institutionName,
+                        reportTitle: _reportTitle,
+                        grandTotal: _grandTotal,
+                        reportType: widget.reportType,
+                      );
+                      final pdfBytes = await pdfService.generatePdf();
+
+                      // Fecha a caixa de diálogo ANTES de mostrar a pré-visualização
+                      if (mounted) Navigator.of(context).pop();
+
+                      // Exibe a pré-visualização do PDF
+                      await Printing.layoutPdf(onLayout: (format) async => pdfBytes);
+                    } catch (e) {
+                      // Em caso de erro, fecha a caixa de diálogo também
+                      if (mounted) Navigator.of(context).pop();
+
+                      // E opcionalmente, mostra uma mensagem de erro
+                      if(mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text("Ocorreu um erro ao gerar o PDF: $e"), backgroundColor: Colors.red),
+                        );
+                      }
+                    }
                   },
                 );
               }
@@ -172,23 +219,26 @@ class _ReportViewPageState extends State<ReportViewPage> {
 
           final reportDataList = snapshot.data!;
           final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+          final bool showSales = widget.reportType == 'complete' || widget.reportType == 'sales_only';
 
           return ListView(
             padding: const EdgeInsets.all(16.0),
             children: [
               ...reportDataList.map((data) => _buildReportSection(data, currencyFormatter)).toList(),
-              const Divider(thickness: 2),
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text("TOTAL GERAL DE VENDAS", style: Theme.of(context).textTheme.titleMedium),
-                    Text(currencyFormatter.format(_grandTotal), style: Theme.of(context).textTheme.headlineSmall),
-                  ],
+              if(showSales) ...[
+                const Divider(thickness: 2),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text("TOTAL GERAL DE VENDAS", style: Theme.of(context).textTheme.titleMedium),
+                      Text(currencyFormatter.format(_grandTotal), style: Theme.of(context).textTheme.headlineSmall),
+                    ],
+                  ),
                 ),
-              ),
+              ],
             ],
           );
         },
@@ -197,7 +247,9 @@ class _ReportViewPageState extends State<ReportViewPage> {
   }
 
   Widget _buildReportSection(ReportData data, NumberFormat currencyFormatter) {
-    // Nenhuma alteração necessária aqui
+    final bool showClients = widget.reportType == 'complete' || widget.reportType == 'clients_only';
+    final bool showSales = widget.reportType == 'complete' || widget.reportType == 'sales_only';
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 24.0),
       child: Column(
@@ -205,21 +257,24 @@ class _ReportViewPageState extends State<ReportViewPage> {
         children: [
           Text(data.salespersonName, style: Theme.of(context).textTheme.headlineSmall),
           const Divider(),
-          ListTile(
-            title: const Text("Valor Total de Vendas (mês)"),
-            trailing: Text(currencyFormatter.format(data.totalSales), style: Theme.of(context).textTheme.titleMedium),
-          ),
-          ListTile(
-            title: const Text("Item Mais Vendido (mês)"),
-            trailing: Text(data.topSellingItem, style: Theme.of(context).textTheme.titleMedium),
-          ),
-          ExpansionTile(
-            title: Text("Relação de Clientes (${data.clients.length})"),
-            children: data.clients.map((client) => ListTile(
-              title: Text(client.companyName),
-              subtitle: Text(client.city),
-            )).toList(),
-          ),
+          if (showSales) ...[
+            ListTile(
+              title: const Text("Valor Total de Vendas (mês)"),
+              trailing: Text(currencyFormatter.format(data.totalSales), style: Theme.of(context).textTheme.titleMedium),
+            ),
+            ListTile(
+              title: const Text("Item Mais Vendido (mês)"),
+              trailing: Text(data.topSellingItem, style: Theme.of(context).textTheme.titleMedium, textAlign: TextAlign.right,),
+            ),
+          ],
+          if (showClients && data.clients.isNotEmpty)
+            ExpansionTile(
+              title: Text("Relação de Clientes (${data.clients.length})"),
+              children: data.clients.map((client) => ListTile(
+                title: Text(client.companyName),
+                subtitle: Text(client.city),
+              )).toList(),
+            ),
         ],
       ),
     );

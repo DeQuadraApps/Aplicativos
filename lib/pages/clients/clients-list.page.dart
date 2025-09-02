@@ -18,10 +18,27 @@ class _ClientsListPageState extends State<ClientsListPage> {
   UserModel? _currentUserData;
   Stream<QuerySnapshot<Map<String, dynamic>>>? _clientsStream;
 
+  // ✨ 1. ESTADOS PARA A PESQUISA
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
     _initializeUserDataAndStream();
+    // Adiciona um listener para atualizar a UI quando o texto de pesquisa mudar
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text;
+      });
+    });
+  }
+
+  // ✨ Não esqueça de fazer o dispose do controller
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeUserDataAndStream() async {
@@ -39,7 +56,6 @@ class _ClientsListPageState extends State<ClientsListPage> {
           .collection('institutions').doc(_institutionId)
           .collection('clients');
 
-      // A lógica chave: se o utilizador não for admin, filtra pelo seu próprio ID.
       if (_currentUserData!.role != 'admin') {
         query = query.where('salespersonId', isEqualTo: user.uid);
       }
@@ -109,79 +125,110 @@ class _ClientsListPageState extends State<ClientsListPage> {
           },
           child: const Icon(Icons.add),
         ),
-        body: _clientsStream == null
-            ? const Center(child: CircularProgressIndicator())
-            : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _clientsStream,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              debugPrint("===================== ERRO AO CARREGAR CLIENTES =====================");
-              debugPrint("VERIFIQUE SE O ERRO ABAIXO CONTÉM UM LINK PARA CRIAR ÍNDICE:");
-              debugPrint("${snapshot.error}");
-              debugPrint("=====================================================================");
-              return Center(child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Text("Erro ao carregar clientes.\n\nVerifique o console de depuração para mais detalhes e para um possível link de criação de índice no Firebase.", textAlign: TextAlign.center),
-              ));
-            }
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-              return const Center(child: Text('Nenhum cliente cadastrado.'));
-            }
+        body: Column( // ✨ Adicionado Column para acomodar a pesquisa e a lista
+          children: [
+            // ✨ 2. CAMPO DE PESQUISA
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 0),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  labelText: 'Pesquisar por nome, CNPJ ou CPF...',
+                  prefixIcon: const Icon(Icons.search),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () => _searchController.clear(),
+                  )
+                      : null,
+                ),
+              ),
+            ),
+            // ✨ Envolve o StreamBuilder com Expanded
+            Expanded(
+              child: _clientsStream == null
+                  ? const Center(child: CircularProgressIndicator())
+                  : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: _clientsStream,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    debugPrint("===================== ERRO AO CARREGAR CLIENTES =====================");
+                    debugPrint("VERIFIQUE SE O ERRO ABAIXO CONTÉM UM LINK PARA CRIAR ÍNDICE:");
+                    debugPrint("${snapshot.error}");
+                    debugPrint("=====================================================================");
+                    return Center(child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text("Erro ao carregar clientes.\n\nVerifique o console de depuração para mais detalhes.", textAlign: TextAlign.center),
+                    ));
+                  }
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    return const Center(child: Text('Nenhum cliente cadastrado.'));
+                  }
 
-            final clients = snapshot.data!.docs.map((doc) => Client.fromFirestore(doc)).toList();
-            return ListView.builder(
-              padding: const EdgeInsets.all(8),
-              itemCount: clients.length,
-              itemBuilder: (context, index) {
-                final client = clients[index];
-                return Card(
-                  child: ListTile(
-                    title: Text(client.companyName),
-                    subtitle: Text(client.cnpj),
-                    trailing: PopupMenuButton(
-                      onSelected: (value) {
-                        if (value == 'edit') {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => AddEditClientPage(
-                              institutionId: _institutionId!,
-                              client: client,
-                            )),
-                          );
-                        } else if (value == 'delete') {
-                          _deleteClient(client.id!);
-                        }
-                      },
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(
-                          value: 'edit',
-                          child: Row(
-                            children: [
-                              Icon(Icons.edit_note, size: 20),
-                              SizedBox(width: 8),
-                              Text('Editar Cliente'),
+                  final allClients = snapshot.data!.docs.map((doc) => Client.fromFirestore(doc)).toList();
+
+                  // ✨ 3. APLICANDO O FILTRO
+                  final filteredClients = allClients.where((client) {
+                    if (_searchQuery.isEmpty) {
+                      return true;
+                    }
+                    final queryLower = _searchQuery.toLowerCase();
+                    final nameLower = client.companyName.toLowerCase();
+                    // Como o campo cnpj já armazena CPF também, uma única verificação é suficiente
+                    final cnpjLower = client.cnpj.toLowerCase();
+
+                    return nameLower.contains(queryLower) || cnpjLower.contains(queryLower);
+                  }).toList();
+
+                  if (filteredClients.isEmpty) {
+                    return Center(child: Text('Nenhum resultado encontrado para "$_searchQuery"'));
+                  }
+
+                  return ListView.builder(
+                    padding: const EdgeInsets.all(8),
+                    itemCount: filteredClients.length, // Usa a lista filtrada
+                    itemBuilder: (context, index) {
+                      final client = filteredClients[index]; // Usa a lista filtrada
+                      return Card(
+                        child: ListTile(
+                          title: Text(client.companyName),
+                          subtitle: Text(client.cnpj),
+                          trailing: PopupMenuButton(
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (context) => AddEditClientPage(
+                                    institutionId: _institutionId!,
+                                    client: client,
+                                  )),
+                                );
+                              } else if (value == 'delete') {
+                                _deleteClient(client.id!);
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: ListTile(leading: Icon(Icons.edit_note), title: Text('Editar')),
+                              ),
+                              const PopupMenuItem(
+                                  value: 'delete',
+                                  child: ListTile(leading: Icon(Icons.delete_forever, color: Colors.red), title: Text('Excluir'))),
                             ],
                           ),
                         ),
-                        const PopupMenuItem(
-                            value: 'delete',
-                            child: Row(
-                              children: [
-                                Icon(Icons.delete_forever, size: 20, color: Colors.red),
-                                SizedBox(width: 8),
-                                Text('Excluir Cliente'),
-                              ],
-                            )),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            );
-          },
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );

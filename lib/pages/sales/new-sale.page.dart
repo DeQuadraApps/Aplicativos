@@ -468,26 +468,54 @@ class _NewSalePageState extends State<NewSalePage> {
             );
           },
           optionsBuilder: (textEditingValue) async {
-            final query = textEditingValue.text.toLowerCase();
-            if (query.isEmpty) return const Iterable.empty();
+            final queryText = textEditingValue.text;
+            if (queryText.isEmpty) return const Iterable.empty();
 
             final clientsRef = FirebaseFirestore.instance
                 .collection('institutions').doc(_institutionId!)
                 .collection('clients');
 
-            final nameSnapshot = await clientsRef
-                .where('companyName', isGreaterThanOrEqualTo: textEditingValue.text)
-                .where('companyName', isLessThanOrEqualTo: '${textEditingValue.text}\uf8ff')
+            final searchEnd = '$queryText\uf8ff';
+
+            // Executa as buscas por texto
+            final nameQuery = clientsRef
+                .where('companyName', isGreaterThanOrEqualTo: queryText)
+                .where('companyName', isLessThanOrEqualTo: searchEnd)
                 .get();
 
-            final citySnapshot = await clientsRef
-                .where('city', isGreaterThanOrEqualTo: textEditingValue.text)
-                .where('city', isLessThanOrEqualTo: '${textEditingValue.text}\uf8ff')
+            final cityQuery = clientsRef
+                .where('city', isGreaterThanOrEqualTo: queryText)
+                .where('city', isLessThanOrEqualTo: searchEnd)
                 .get();
 
-            final allDocs = {...nameSnapshot.docs, ...citySnapshot.docs}.toList();
+            final cnpjQuery = clientsRef
+                .where('cnpj', isGreaterThanOrEqualTo: queryText)
+                .where('cnpj', isLessThanOrEqualTo: searchEnd)
+                .get();
 
-            return allDocs.map((doc) => Client.fromFirestore(doc as DocumentSnapshot<Map<String, dynamic>>));
+            final results = await Future.wait([nameQuery, cityQuery, cnpjQuery]);
+
+            // Junta os resultados e remove duplicados
+            final allDocs = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+            for (final snapshot in results) {
+              for (final doc in snapshot.docs) {
+                allDocs[doc.id] = doc;
+              }
+            }
+
+            // Mapeia para objetos Client
+            var clients = allDocs.values.map((doc) => Client.fromFirestore(doc));
+
+            // Aplica o filtro de vendedor no código Dart
+            if (_currentUserRole != 'admin') {
+              final currentUser = FirebaseAuth.instance.currentUser;
+              if (currentUser != null) {
+                // ✨ AQUI ESTÁ A CORREÇÃO PRINCIPAL ✨
+                clients = clients.where((client) => client.salespersonId == currentUser.uid).toList();
+              }
+            }
+
+            return clients;
           },
           onSelected: (client) => _onClientSelected(client),
         ),

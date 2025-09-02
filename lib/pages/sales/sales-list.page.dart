@@ -1,4 +1,3 @@
-// lib/pages/sales/sales-list.page.dart
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -27,10 +26,27 @@ class _SalesListPageState extends State<SalesListPage> {
   UserModel? _currentUserData;
   Stream<QuerySnapshot<Map<String, dynamic>>>? _salesStream;
 
+  // ✨ 1. ESTADOS PARA A PESQUISA
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
     _initializeUserDataAndStream();
+    // Adiciona um listener para atualizar a UI quando o texto de pesquisa mudar
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text;
+      });
+    });
+  }
+
+  // ✨ Não esqueça de fazer o dispose do controller
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeUserDataAndStream() async {
@@ -68,6 +84,7 @@ class _SalesListPageState extends State<SalesListPage> {
     }
   }
 
+  // ... (seus outros métodos _deleteSale, _fetchFullClient, etc. continuam os mesmos)
   void _deleteSale(String saleId) {
     if (_institutionId == null) return;
     showDialog(
@@ -101,7 +118,7 @@ class _SalesListPageState extends State<SalesListPage> {
     final clientDoc = await FirebaseFirestore.instance
         .collection('institutions').doc(_institutionId!)
         .collection('clients').doc(clientId).get();
-    return clientDoc.exists ? Client.fromFirestore(clientDoc as DocumentSnapshot<Map<String, dynamic>>) : null;
+    return clientDoc.exists ? Client.fromFirestore(clientDoc) : null;
   }
 
   Future<void> _showPdfPreview(Sale sale) async {
@@ -137,6 +154,7 @@ class _SalesListPageState extends State<SalesListPage> {
     }
   }
 
+
   @override
   Widget build(BuildContext context) {
     final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
@@ -144,82 +162,124 @@ class _SalesListPageState extends State<SalesListPage> {
 
     return Scaffold(
       appBar: AppBar(title: Text(_currentUserData?.role == 'admin' ? 'Histórico de Vendas' : 'Minhas Vendas')),
-      body: _salesStream == null
-          ? const Center(child: CircularProgressIndicator())
-          : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _salesStream,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            debugPrint("ERRO AO CARREGAR VENDAS: ${snapshot.error}");
-            return Center(child: Text("Erro ao carregar vendas. Verifique o console."));
-          }
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('Nenhuma venda registrada ainda.'));
+      body: Column( // ✨ Adicionado Column para acomodar a pesquisa e a lista
+        children: [
+          // ✨ 2. CAMPO DE PESQUISA
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: 'Pesquisar por cliente ou data (dd/mm/aaaa)...',
+                prefixIcon: const Icon(Icons.search),
+                border: const OutlineInputBorder(),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () {
+                    _searchController.clear();
+                  },
+                )
+                    : null,
+              ),
+            ),
+          ),
+          // ✨ Envolve o StreamBuilder com Expanded
+          Expanded(
+            child: _salesStream == null
+                ? const Center(child: CircularProgressIndicator())
+                : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _salesStream,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  debugPrint("ERRO AO CARREGAR VENDAS: ${snapshot.error}");
+                  return Center(child: Text("Erro ao carregar vendas. Verifique o console."));
+                }
+                if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('Nenhuma venda registrada ainda.'));
 
-          final sales = snapshot.data!.docs.map((doc) => Sale.fromFirestore(doc)).toList();
+                final allSales = snapshot.data!.docs.map((doc) => Sale.fromFirestore(doc)).toList();
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(8),
-            itemCount: sales.length,
-            itemBuilder: (context, index) {
-              final sale = sales[index];
-              return Card(
-                elevation: 2,
-                margin: const EdgeInsets.symmetric(vertical: 6),
-                child: ExpansionTile(
-                  title: Text(sale.clientName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('Data: ${dateFormatter.format(sale.saleDate)} • Pgto: ${sale.paymentMethod}'),
-                  // +++ LÓGICA DO TRAILING ATUALIZADA +++
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        currencyFormatter.format(sale.totalAmount),
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                      PopupMenuButton<String>(
-                        icon: const Icon(Icons.more_vert),
-                        onSelected: (value) {
-                          switch (value) {
-                            case 'edit':
-                              Navigator.push(context, MaterialPageRoute(builder: (context) => EditSalePage(sale: sale)));
-                              break;
-                            case 'delete':
-                              _deleteSale(sale.id!);
-                              break;
-                            case 'pdf':
-                              _showPdfPreview(sale);
-                              break;
-                            case 'share':
-                              _shareSale(sale);
-                              break;
-                          }
-                        },
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
-                          const PopupMenuItem(value: 'pdf', child: ListTile(leading: Icon(Icons.picture_as_pdf_outlined), title: Text('Ver PDF'))),
-                          const PopupMenuItem(value: 'share', child: ListTile(leading: Icon(Icons.share_outlined), title: Text('Partilhar'))),
-                          const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_forever_outlined, color: Colors.red), title: Text('Excluir', style: TextStyle(color: Colors.red)))),
+                // ✨ 3. APLICANDO O FILTRO
+                final filteredSales = allSales.where((sale) {
+                  if (_searchQuery.isEmpty) {
+                    return true; // Mostra todos se a pesquisa estiver vazia
+                  }
+                  final queryLower = _searchQuery.toLowerCase();
+                  final clientNameLower = sale.clientName.toLowerCase();
+                  final formattedDate = dateFormatter.format(sale.saleDate);
+
+                  // Verifica se o nome do cliente OU a data formatada contêm o texto da pesquisa
+                  return clientNameLower.contains(queryLower) || formattedDate.contains(queryLower);
+                }).toList();
+
+                if (filteredSales.isEmpty) {
+                  return Center(child: Text('Nenhum resultado encontrado para "$_searchQuery"'));
+                }
+
+                return ListView.builder(
+                  padding: const EdgeInsets.all(8),
+                  itemCount: filteredSales.length, // Usa a lista filtrada
+                  itemBuilder: (context, index) {
+                    final sale = filteredSales[index]; // Usa a lista filtrada
+                    return Card(
+                      elevation: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 6),
+                      child: ExpansionTile(
+                        title: Text(sale.clientName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text('Data: ${dateFormatter.format(sale.saleDate)} • Pgto: ${sale.paymentMethod}'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              currencyFormatter.format(sale.totalAmount),
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            ),
+                            PopupMenuButton<String>(
+                              icon: const Icon(Icons.more_vert),
+                              onSelected: (value) {
+                                switch (value) {
+                                  case 'edit':
+                                    Navigator.push(context, MaterialPageRoute(builder: (context) => EditSalePage(sale: sale)));
+                                    break;
+                                  case 'delete':
+                                    _deleteSale(sale.id!);
+                                    break;
+                                  case 'pdf':
+                                    _showPdfPreview(sale);
+                                    break;
+                                  case 'share':
+                                    _shareSale(sale);
+                                    break;
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
+                                const PopupMenuItem(value: 'pdf', child: ListTile(leading: Icon(Icons.picture_as_pdf_outlined), title: Text('Ver PDF'))),
+                                const PopupMenuItem(value: 'share', child: ListTile(leading: Icon(Icons.share_outlined), title: Text('Partilhar'))),
+                                const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_forever_outlined, color: Colors.red), title: Text('Excluir', style: TextStyle(color: Colors.red)))),
+                              ],
+                            ),
+                          ],
+                        ),
+                        children: [
+                          const Divider(height: 1),
+                          for (final item in sale.items)
+                            ListTile(
+                              dense: true,
+                              title: Text(item.product.name),
+                              leading: Text('${item.quantity}x'),
+                              trailing: Text(currencyFormatter.format(item.totalPrice)),
+                            ),
                         ],
                       ),
-                    ],
-                  ),
-                  children: [
-                    const Divider(height: 1),
-                    for (final item in sale.items)
-                      ListTile(
-                        dense: true,
-                        title: Text(item.product.name),
-                        leading: Text('${item.quantity}x'),
-                        trailing: Text(currencyFormatter.format(item.totalPrice)),
-                      ),
-                    // A linha de botões antiga foi removida daqui.
-                  ],
-                ),
-              );
-            },
-          );
-        },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
