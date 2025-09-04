@@ -229,7 +229,7 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
       cnpj: _documentCtrl.text.trim(),
       stateRegistration: _secondaryDocumentCtrl.text.trim(),
       address: _addressCtrl.text.trim(),
-      city: _cityCtrl.text.trim(),
+      city: _cityCtrl.text.toUpperCase().trim(),
       district: _districtCtrl.text.trim(),
       houseNumber: _houseNumberCtrl.text.trim(),
       phone: _phoneCtrl.text.trim(),

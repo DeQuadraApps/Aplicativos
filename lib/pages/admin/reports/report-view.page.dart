@@ -1,12 +1,15 @@
 // lib/pages/admin/report_view_page.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart'; // Importante para a função `compute`
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import 'package:quadra_vendas/models/client.model.dart';
 import 'package:quadra_vendas/models/sale.model.dart';
 import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/services/pdf-report-service.dart';
+import 'package:pdf/widgets.dart' as pw; // Importar para pw.Font
 
 class ReportViewPage extends StatefulWidget {
   final String institutionId;
@@ -127,7 +130,16 @@ class _ReportViewPageState extends State<ReportViewPage> {
       ));
     }
 
-    _grandTotal = grandTotalTemp;
+    // Usamos setState aqui para garantir que o título e o total sejam atualizados na tela
+    // antes de qualquer outra ação.
+    if(mounted) {
+      setState(() {
+        _grandTotal = grandTotalTemp;
+        // O título já é setado acima, mas garantimos aqui.
+        _reportTitle = _reportTitle;
+      });
+    }
+
     return processedData;
   }
 
@@ -144,11 +156,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
                 return IconButton(
                   icon: const Icon(Icons.picture_as_pdf),
                   tooltip: 'Exportar para PDF',
-                  // =======================================================
-                  // !! MUDANÇA AQUI: LÓGICA PARA EXIBIR O PROGRESSO !!
-                  // =======================================================
                   onPressed: () async {
-                    // Exibe a caixa de diálogo de progresso
                     showDialog(
                       context: context,
                       barrierDismissible: false,
@@ -170,26 +178,35 @@ class _ReportViewPageState extends State<ReportViewPage> {
                     );
 
                     try {
-                      // Gera o PDF (processo demorado)
+                      // =======================================================
+                      // !! MUDANÇA PRINCIPAL AQUI !!
+                      // Usamos `compute` para rodar a função `_generatePdfInBackground`
+                      // em segundo plano, passando os dados necessários.
+                      // =======================================================
+                      final fontData = await rootBundle.load("assets/fonts/Roboto-Regular.ttf");
+                      final boldFontData = await rootBundle.load("assets/fonts/Roboto-Bold.ttf");
+                      final ttf = pw.Font.ttf(fontData);
+                      final boldTtf = pw.Font.ttf(boldFontData);
+
                       final pdfService = PdfReportService(
                         reportDataList: snapshot.data!,
                         institutionName: _institutionName,
                         reportTitle: _reportTitle,
                         grandTotal: _grandTotal,
                         reportType: widget.reportType,
+                        font: ttf,
+                        boldFont: boldTtf,
                       );
+
                       final pdfBytes = await pdfService.generatePdf();
 
-                      // Fecha a caixa de diálogo ANTES de mostrar a pré-visualização
+                      // 3. Fechamos o diálogo e mostramos o PDF
                       if (mounted) Navigator.of(context).pop();
-
-                      // Exibe a pré-visualização do PDF
                       await Printing.layoutPdf(onLayout: (format) async => pdfBytes);
+
                     } catch (e) {
-                      // Em caso de erro, fecha a caixa de diálogo também
                       if (mounted) Navigator.of(context).pop();
 
-                      // E opcionalmente, mostra uma mensagem de erro
                       if(mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(content: Text("Ocorreu um erro ao gerar o PDF: $e"), backgroundColor: Colors.red),
@@ -199,7 +216,11 @@ class _ReportViewPageState extends State<ReportViewPage> {
                   },
                 );
               }
-              return const SizedBox.shrink();
+              // Mostra um ícone de "carregando" enquanto os dados não chegam
+              return const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+              );
             },
           )
         ],
@@ -211,7 +232,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return Center(child: Text("Erro ao gerar relatório: ${snapshot.error}"));
+            return Center(child: Text("Erro ao carregar dados: ${snapshot.error}"));
           }
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
             return const Center(child: Text("Nenhum dado encontrado para este relatório."));
