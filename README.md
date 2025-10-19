@@ -1,1 +1,1 @@
-# Arquivo de instalação QuadraVendas
+# Arquivo de instalação dos aplicativos da DeQuadraApps
