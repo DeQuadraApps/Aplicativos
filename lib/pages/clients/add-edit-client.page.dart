@@ -220,8 +220,13 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
       salespersonToAssign = FirebaseAuth.instance.currentUser!.uid;
     }
 
-    // ✨ 3. REMOVIDA A VERIFICAÇÃO DE DUPLICIDADE DAQUI
-    // A verificação agora é feita em tempo real no _onDocumentChanged
+    final Timestamp? createdOnValue;
+
+    if (widget.client == null) {
+      createdOnValue = Timestamp.now();
+    } else {
+      createdOnValue = widget.client!.createdOn;
+    }
 
     Client clientToSave = Client(
       id: widget.client?.id,
@@ -238,6 +243,7 @@ class _AddEditClientPageState extends State<AddEditClientPage> {
       contactName: _contactNameCtrl.text.trim(),
       salespersonId: salespersonToAssign,
       clientType: _selectedClientType == ClientType.pf ? 'PF' : 'PJ',
+      createdOn: createdOnValue,
     );
 
     try {

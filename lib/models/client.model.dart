@@ -15,6 +15,7 @@ class Client {
   final String contactName;
   final String salespersonId;
   final String clientType;
+  final Timestamp? createdOn;
 
   Client({
     this.id,
@@ -31,6 +32,7 @@ class Client {
     required this.contactName,
     required this.salespersonId,
     this.clientType = 'PJ',
+    this.createdOn,
   });
 
   factory Client.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -50,6 +52,7 @@ class Client {
       contactName: data['contactName'] ?? '',
       salespersonId: data['salespersonId'] ?? '',
       clientType: data['clientType'] ?? 'PJ',
+      createdOn: data['createdOn'] as Timestamp?,
     );
   }
 
@@ -68,6 +71,7 @@ class Client {
       'contactName': contactName,
       'salespersonId': salespersonId,
       'clientType': clientType,
+      'createdOn': createdOn,
     };
   }
 
@@ -86,6 +90,7 @@ class Client {
     String? contactName,
     String? salespersonId,
     String? clientType,
+    Timestamp? createdOn,
   }) {
     return Client(
       id: id ?? this.id,
@@ -101,7 +106,8 @@ class Client {
       paymentMethod: paymentMethod ?? this.paymentMethod,
       contactName: contactName ?? this.contactName,
       salespersonId: salespersonId ?? this.salespersonId,
-      clientType: clientType ?? this.clientType
+      clientType: clientType ?? this.clientType,
+      createdOn: createdOn ?? this.createdOn,
     );
   }
 }

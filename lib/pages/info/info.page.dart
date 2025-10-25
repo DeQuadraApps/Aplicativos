@@ -1,5 +1,6 @@
 // lib/pages/info/info_page.dart
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:quadra_vendas/pages/terms/terms-of-use.page.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -42,10 +43,28 @@ class InfoPage extends StatelessWidget {
               );
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: const Text('Versão'),
-            subtitle: const Text('2.2.4'), // Pode atualizar conforme desenvolve
+          FutureBuilder<PackageInfo>(
+            future: PackageInfo.fromPlatform(),
+            builder: (context, snapshot) {
+              String versionText;
+
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                versionText = 'Carregando...';
+              } else if (snapshot.hasError) {
+                versionText = 'Erro ao ler a versão';
+                print(snapshot.error);
+              } else if (snapshot.hasData) {
+                versionText = '${snapshot.data!.version}';
+              } else {
+                versionText = 'Versão não encontrada';
+              }
+
+              return ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('Versão'),
+                subtitle: Text(versionText),
+              );
+            },
           ),
         ],
       ),

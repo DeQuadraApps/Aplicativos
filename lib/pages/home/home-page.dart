@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:quadra_vendas/models/goal.model.dart';
 import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/pages/admin/reports/report-options.page.dart';
@@ -22,6 +23,8 @@ import 'package:quadra_vendas/pages/settings/settings.page.dart';
 import 'package:quadra_vendas/widgets/goal-progress-card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:showcaseview/showcaseview.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
+import 'package:url_launcher/url_launcher.dart';
 
 // --- ESTRUTURAS DE DADOS ---
 class HomePageMetrics {
@@ -30,8 +33,11 @@ class HomePageMetrics {
   final int salesCount;
   final double totalRevenue;
   final double monthRevenue;
+  final double weekRevenue;
+  final double dayRevenue;
   final SalesGoal? monthlyGoal;
   final int? myClientsCount;
+  final int newClientsMonthCount;
 
   HomePageMetrics({
     required this.clientCount,
@@ -39,6 +45,9 @@ class HomePageMetrics {
     required this.salesCount,
     required this.totalRevenue,
     required this.monthRevenue,
+    required this.weekRevenue,
+    required this.dayRevenue,
+    required this.newClientsMonthCount,
     this.monthlyGoal,
     this.myClientsCount
   });
@@ -97,7 +106,13 @@ class _HomePageContentState extends State<_HomePageContent> {
     super.initState();
     _initConnectivity();
     _metricsFuture = _fetchHomePageData();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _promptTourIfNeeded());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final bool updateDialogShown = await _checkVersion();
+
+      if (!updateDialogShown && mounted) {
+        _promptTourIfNeeded();
+      }
+    });
   }
 
   @override
@@ -106,7 +121,6 @@ class _HomePageContentState extends State<_HomePageContent> {
     super.dispose();
   }
 
-  // ... Métodos do Showcase e Navegação (sem alterações) ...
   List<GlobalKey> _getMenuTourKeys() {
     final bool isAdmin = _currentUserData?.role == 'admin';
     final keys = <GlobalKey>[];
@@ -117,6 +131,73 @@ class _HomePageContentState extends State<_HomePageContent> {
     keys.addAll([_keyClientesMenu, _keyProdutosMenu, _keyVendasMenu, _keyRegistrarVendaMenu]);
     return keys;
   }
+
+  Future<void> _launchUpdateURL() async {
+    final url = Uri.parse('https://dequadraapps.com.br/pages/produto-app1.html');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else {
+      if(mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('não foi possível abrir a página de atualização.')),
+        );
+      }
+    }
+  }
+
+  Future<bool> _checkVersion() async {
+    // 1. "somente se estiver o app instalado.apk"
+    // kReleaseMode é 'true' para builds de release (apk/aab) e 'false' para debug
+    if (!kReleaseMode) {
+      print('modo debug, pulando verificação de versão.');
+      return false; // não está em release, não mostra o dialog
+    }
+
+    try {
+      // 2. pega a versão local
+      final packageInfo = await PackageInfo.fromPlatform();
+      // 'buildNumber' é o 'versionCode' no android
+      final localVersionCode = int.tryParse(packageInfo.buildNumber) ?? 0;
+
+      final doc = await FirebaseFirestore.instance.doc('application/version').get();
+      if (!doc.exists) {
+        print('documento de versão não encontrado no firestore.');
+        return false;
+      }
+
+      final remoteVersionCode = doc.data()?['versionCode'] as int? ?? 0;
+
+      print('versão local: $localVersionCode | versão remota: $remoteVersionCode');
+
+      if (localVersionCode < remoteVersionCode) {
+        if (!mounted) return true;
+
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => WillPopScope(
+            onWillPop: () async => false,
+            child: AlertDialog(
+              title: const Text('Atualização Disponível'),
+              content: const Text('uma nova versão do aplicativo está disponível. por favor, atualize para a versão mais recente para continuar usando.'),
+              actions: [
+                TextButton(
+                  child: const Text('ATUALIZAR AGORA'),
+                  onPressed: _launchUpdateURL,
+                ),
+              ],
+            ),
+          ),
+        );
+        return true;
+      }
+    } catch (e) {
+      print('erro ao verificar a versão: $e');
+    }
+
+    return false;
+  }
+
   void _startMenuTour() {
     _scaffoldKey.currentState?.openDrawer();
     Future.delayed(const Duration(milliseconds: 400), () {
@@ -178,38 +259,70 @@ class _HomePageContentState extends State<_HomePageContent> {
     final institutionId = localUserData.institutionId;
     final institutionRef = FirebaseFirestore.instance.collection('institutions').doc(institutionId);
 
+    final now = DateTime.now();
+    // DEFINIÇÕES DE DATA
+    final startOfMonth = DateTime(now.year, now.month, 1);
+    final startOfDay = DateTime(now.year, now.month, now.day);
+    // (weekday: seg=1, dom=7) - subtrai os dias passados desde segunda
+    final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+    final startOfWeekClean = DateTime(startOfWeek.year, startOfWeek.month, startOfWeek.day);
+
+    final endOfMonth = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
+
+    Future<AggregateQuerySnapshot>? newClientsCountFuture;
+
     if (localUserData.role == 'admin') {
       final salespeopleSnapshot = await FirebaseFirestore.instance.collection('users')
           .where('institutionId', isEqualTo: institutionId)
           .where('role', whereIn: ['employee', 'salesperson'])
           .get();
       _salespeople = salespeopleSnapshot.docs.map((doc) => UserModel.fromFirestore(doc)).toList();
+
+      newClientsCountFuture = institutionRef.collection('clients')
+          .where('createdOn', isGreaterThanOrEqualTo: startOfMonth)
+          .where('createdOn', isLessThanOrEqualTo: endOfMonth)
+          .count()
+          .get();
     }
 
     final institutionDocFuture = institutionRef.get();
-    final now = DateTime.now();
-    final startOfMonth = DateTime(now.year, now.month, 1);
+
     Query salesQuery = institutionRef.collection('sales');
     if(localUserData.role != 'admin'){
       salesQuery = salesQuery.where('userId', isEqualTo: currentUser!.uid);
     }
+    // query pega todas as vendas, o filtro é feito no loop
     final salesSnapshotFuture = salesQuery.get();
+
     SalesGoal? monthlyGoal;
     if (localUserData.role != 'admin') {
       final goalQuery = await institutionRef.collection('goals').where('salespersonId', isEqualTo: currentUser!.uid).where('year', isEqualTo: now.year).where('month', isEqualTo: now.month).limit(1).get();
       if(goalQuery.docs.isNotEmpty) monthlyGoal = SalesGoal.fromFirestore(goalQuery.docs.first);
     }
-    int clientCount = 0, productCount = 0, myClientsCount = 0;
+
+    int clientCount = 0, productCount = 0, myClientsCount = 0, newClientsMonthCount = 0;
+
     if(localUserData.role == 'admin'){
-      final results = await Future.wait([institutionRef.collection('clients').count().get(), institutionRef.collection('products').count().get()]);
+      final results = await Future.wait([
+        institutionRef.collection('clients').count().get(),
+        institutionRef.collection('products').count().get()
+      ]);
       clientCount = (results[0]).count ?? 0;
       productCount = (results[1]).count ?? 0;
+
+      if (newClientsCountFuture != null) {
+        final newClientsSnapshot = await newClientsCountFuture;
+        newClientsMonthCount = newClientsSnapshot.count ?? 0;
+      }
+
     } else {
       final myClientsSnapshot = await institutionRef.collection('clients').where('salespersonId', isEqualTo: currentUser!.uid).count().get();
       myClientsCount = myClientsSnapshot.count ?? 0;
     }
+
     final institutionDoc = await institutionDocFuture;
     final salesSnapshot = await salesSnapshotFuture;
+
     if (mounted) {
       setState(() {
         _institutionId = institutionId;
@@ -220,20 +333,44 @@ class _HomePageContentState extends State<_HomePageContent> {
         if (timestamp != null) _expirationDateStr = DateFormat('dd/MM/yyyy').format(timestamp.toDate());
       });
     }
+
     int salesCount = salesSnapshot.size;
-    double totalRevenue = 0, monthRevenue = 0;
+    // INICIALIZA AS NOVAS VARIÁVEIS
+    double totalRevenue = 0, monthRevenue = 0, weekRevenue = 0, dayRevenue = 0;
+
     for (var doc in salesSnapshot.docs) {
       final saleData = doc.data() as Map<String, dynamic>;
       final amount = (saleData['totalAmount'] as num? ?? 0).toDouble();
+      final saleDate = (saleData['saleDate'] as Timestamp).toDate(); // pegamos a data da venda
+
       totalRevenue += amount;
-      if ((saleData['saleDate'] as Timestamp).toDate().isAfter(startOfMonth)) {
+
+      // CÁLCULO DOS 3 PERÍODOS
+      if (saleDate.isAfter(startOfMonth)) {
         monthRevenue += amount;
       }
+      if (saleDate.isAfter(startOfWeekClean)) {
+        weekRevenue += amount;
+      }
+      if (saleDate.isAfter(startOfDay)) {
+        dayRevenue += amount;
+      }
     }
-    return HomePageMetrics(clientCount: clientCount, productCount: productCount, salesCount: salesCount, totalRevenue: totalRevenue, monthRevenue: monthRevenue, monthlyGoal: monthlyGoal, myClientsCount: myClientsCount);
+
+    return HomePageMetrics(
+      clientCount: clientCount,
+      productCount: productCount,
+      salesCount: salesCount,
+      totalRevenue: totalRevenue,
+      monthRevenue: monthRevenue,
+      weekRevenue: weekRevenue,
+      dayRevenue: dayRevenue,
+      monthlyGoal: monthlyGoal,
+      myClientsCount: myClientsCount,
+      newClientsMonthCount: newClientsMonthCount,
+    );
   }
 
-  // ✨ CORREÇÃO: Função para abrir uma página de tela cheia para o gráfico
   void _showChartPage(String title, Widget content) {
     Navigator.push(context, MaterialPageRoute(builder: (context) {
       return Scaffold(
@@ -246,7 +383,6 @@ class _HomePageContentState extends State<_HomePageContent> {
     }));
   }
 
-  // Função para modais de lista (não-gráficos)
   void _showDetailsModal(String title, Widget content) {
     showDialog(
       context: context,
@@ -328,7 +464,15 @@ class _HomePageContentState extends State<_HomePageContent> {
     return LayoutBuilder(
       builder: (context, constraints) {
         int crossAxisCount = 2;
-        if (constraints.maxWidth >= 800) crossAxisCount = 3;
+        double childAspectRatio = 2.0;
+
+        if (constraints.maxWidth < 600) {
+          crossAxisCount = 1;
+        } else if (constraints.maxWidth >= 800) {
+          crossAxisCount = 3;
+        } else {
+          crossAxisCount = 2;
+        }
 
         return GridView.count(
           crossAxisCount: crossAxisCount,
@@ -336,24 +480,17 @@ class _HomePageContentState extends State<_HomePageContent> {
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
-          childAspectRatio: 1.2,
+          childAspectRatio: childAspectRatio,
           children: [
             DashboardCard(
               icon: Icons.attach_money,
-              title: 'Minhas Vendas (Mês)',
-              value: currencyFormatter.format(metrics.monthRevenue),
+              title: 'Minhas Vendas (Período)', // TÍTULO ATUALIZADO
+              value: currencyFormatter.format(metrics.monthRevenue), // Continua mostrando o valor do mês
               color: Colors.green,
-              onTap: () => _showDetailsModal(
-                'Minhas Vendas Recentes',
-                _RecentItemsList(
+              onTap: () => _showDetailsModal( // MODAL ATUALIZADO
+                'Minhas Vendas',
+                _SalespersonSalesModal( // ESTE É O NOVO WIDGET MODAL
                   institutionId: _institutionId!,
-                  collectionName: 'sales',
-                  titleField: 'clientName',
-                  subtitleField: 'totalAmount',
-                  icon: Icons.receipt_long,
-                  dateField: 'saleDate',
-                  formatAsCurrency: true,
-                  filterByCurrentUser: true,
                   userId: currentUser!.uid,
                 ),
               ),
@@ -380,9 +517,16 @@ class _HomePageContentState extends State<_HomePageContent> {
     final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
     return LayoutBuilder(
       builder: (context, constraints) {
-        int crossAxisCount = 2;
-        if (constraints.maxWidth > 1200) crossAxisCount = 5;
-        else if (constraints.maxWidth > 800) crossAxisCount = 4;
+        int crossAxisCount;
+        double childAspectRatio = 2.0;
+
+        if (constraints.maxWidth < 600) {
+          crossAxisCount = 1;
+        } else if (constraints.maxWidth > 1000) {
+          crossAxisCount = 3;
+        } else {
+          crossAxisCount = 2;
+        }
 
         return GridView.count(
           crossAxisCount: crossAxisCount,
@@ -390,15 +534,15 @@ class _HomePageContentState extends State<_HomePageContent> {
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
-          childAspectRatio: 1.2,
+          childAspectRatio: childAspectRatio,
           children: [
             DashboardCard(
               icon: Icons.attach_money,
-              title: 'Vendas (Mês)',
+              title: 'Vendas (Período)', // TÍTULO ATUALIZADO
               value: currencyFormatter.format(metrics.monthRevenue),
               color: Colors.green,
               onTap: () => _showDetailsModal(
-                'Vendas por Vendedor',
+                'Vendas por Vendedor', // Título do Modal
                 _SalesValueBySalespersonModal(institutionId: _institutionId!, salespeople: _salespeople),
               ),
             ),
@@ -413,6 +557,16 @@ class _HomePageContentState extends State<_HomePageContent> {
               ),
             ),
             DashboardCard(
+              icon: Icons.person_add_alt_1,
+              title: 'Novos Clientes (Mês)',
+              value: metrics.newClientsMonthCount.toString(),
+              color: Colors.blue,
+              onTap: () => _showDetailsModal(
+                'Novos Clientes',
+                _NewClientsByMonthModal(institutionId: _institutionId!),
+              ),
+            ),
+            DashboardCard(
               icon: Icons.inventory,
               title: 'Total de Produtos',
               value: metrics.productCount.toString(),
@@ -420,11 +574,11 @@ class _HomePageContentState extends State<_HomePageContent> {
             ),
             DashboardCard(
               icon: Icons.shopping_cart,
-              title: 'Nº de Vendas',
+              title: 'Nº de Vendas (Período)', // TÍTULO ATUALIZADO
               value: metrics.salesCount.toString(),
               color: Colors.teal,
               onTap: () => _showDetailsModal(
-                'Nº de Vendas por Vendedor',
+                'Nº de Vendas por Vendedor', // Título do Modal
                 _SalesCountBySalespersonModal(institutionId: _institutionId!, salespeople: _salespeople),
               ),
             ),
@@ -450,6 +604,9 @@ class _HomePageContentState extends State<_HomePageContent> {
 }
 
 // --- WIDGETS DOS CARDS E MODAIS ---
+
+// Enum para controlar o período nos modais de vendas
+enum SalesModalPeriod { Day, Week, Month }
 
 class DashboardCard extends StatelessWidget {
   final IconData icon;
@@ -483,199 +640,6 @@ class DashboardCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _RecentItemsList extends StatelessWidget {
-  final String institutionId;
-  final String collectionName;
-  final String titleField;
-  final String subtitleField;
-  final IconData icon;
-  final String? dateField;
-  final bool formatAsCurrency;
-  final bool filterByCurrentUser;
-  final String userId;
-
-  const _RecentItemsList({
-    required this.institutionId,
-    required this.collectionName,
-    required this.titleField,
-    required this.subtitleField,
-    required this.icon,
-    this.dateField,
-    this.formatAsCurrency = false,
-    this.filterByCurrentUser = false,
-    required this.userId,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    Query query = FirebaseFirestore.instance.collection('institutions').doc(institutionId).collection(collectionName);
-    if (filterByCurrentUser) {
-      final fieldToFilter = collectionName == 'clients' ? 'salespersonId' : 'userId';
-      query = query.where(fieldToFilter, isEqualTo: userId);
-    }
-    if (dateField != null) {
-      query = query.orderBy(dateField!, descending: true);
-    }
-    query = query.limit(10);
-
-    return FutureBuilder<QuerySnapshot>(
-      future: query.get(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError) return const Center(child: Text("Erro ao carregar dados."));
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text("Nenhum item recente encontrado."));
-
-        final docs = snapshot.data!.docs;
-        final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
-
-        return ListView.builder(
-          shrinkWrap: true,
-          itemCount: docs.length,
-          itemBuilder: (context, index) {
-            final data = docs[index].data() as Map<String, dynamic>;
-            final title = data[titleField]?.toString() ?? 'N/A';
-            String subtitle;
-            if (formatAsCurrency) {
-              final amount = (data[subtitleField] as num? ?? 0).toDouble();
-              subtitle = currencyFormatter.format(amount);
-            } else {
-              subtitle = data[subtitleField]?.toString() ?? '';
-            }
-            return ListTile(
-              leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
-              title: Text(title),
-              subtitle: Text(subtitle),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _SalesValueBySalespersonModal extends StatefulWidget {
-  final String institutionId;
-  final List<UserModel> salespeople;
-  const _SalesValueBySalespersonModal({required this.institutionId, required this.salespeople});
-
-  @override
-  State<_SalesValueBySalespersonModal> createState() => _SalesValueBySalespersonModalState();
-}
-
-class _SalesValueBySalespersonModalState extends State<_SalesValueBySalespersonModal> {
-  late int _selectedMonth;
-  late int _selectedYear;
-  late Future<Map<String, double>> _dataFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    final now = DateTime.now();
-    _selectedMonth = now.month;
-    _selectedYear = now.year;
-    _dataFuture = _fetchData();
-  }
-
-  Future<Map<String, double>> _fetchData() async {
-    final startDate = DateTime(_selectedYear, _selectedMonth, 1);
-    final endDate = DateTime(_selectedYear, _selectedMonth + 1, 0, 23, 59, 59);
-
-    final salesSnapshot = await FirebaseFirestore.instance
-        .collection('institutions').doc(widget.institutionId).collection('sales')
-        .where('saleDate', isGreaterThanOrEqualTo: startDate)
-        .where('saleDate', isLessThanOrEqualTo: endDate)
-        .get();
-
-    final salesBySalesperson = <String, double>{};
-    for (var doc in salesSnapshot.docs) {
-      final data = doc.data();
-      final userId = data['userId'] as String;
-      final amount = (data['totalAmount'] as num).toDouble();
-      final salespersonName = widget.salespeople.firstWhere((s) => s.id == userId, orElse: () => UserModel(id: '', fullName: 'Desconhecido', email: '', institutionId: '', role: '')).fullName;
-      salesBySalesperson[salespersonName] = (salesBySalesperson[salespersonName] ?? 0) + amount;
-    }
-    return salesBySalesperson;
-  }
-
-  void _onDateChanged() {
-    setState(() {
-      _dataFuture = _fetchData();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final months = List.generate(12, (i) => DateFormat.MMMM('pt_BR').format(DateTime(0, i + 1)));
-    final years = List.generate(5, (i) => DateTime.now().year - i);
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: DropdownButton<int>(
-                value: _selectedMonth,
-                isExpanded: true,
-                items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(months[i]))),
-                onChanged: (value) {
-                  if (value != null) {
-                    _selectedMonth = value;
-                    _onDateChanged();
-                  }
-                },
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: DropdownButton<int>(
-                value: _selectedYear,
-                isExpanded: true,
-                items: years.map((y) => DropdownMenuItem(value: y, child: Text(y.toString()))).toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    _selectedYear = value;
-                    _onDateChanged();
-                  }
-                },
-              ),
-            ),
-          ],
-        ),
-        const Divider(height: 24),
-        FutureBuilder<Map<String, double>>(
-          future: _dataFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-            if (!snapshot.hasData || snapshot.data!.isEmpty) return const Text('Nenhuma venda encontrada para este período.');
-
-            final data = snapshot.data!;
-            final total = data.values.fold(0.0, (sum, item) => sum + item);
-            final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
-
-            final entries = data.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-
-            return ListView(
-              shrinkWrap: true,
-              children: [
-                ...entries.map((entry) => ListTile(
-                  title: Text(entry.key),
-                  trailing: Text(currencyFormatter.format(entry.value)),
-                )),
-                const Divider(),
-                ListTile(
-                  title: const Text('Total do Período', style: TextStyle(fontWeight: FontWeight.bold)),
-                  trailing: Text(currencyFormatter.format(total), style: const TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ],
-            );
-          },
-        ),
-      ],
     );
   }
 }
@@ -718,118 +682,6 @@ class _ClientsBySalespersonModal extends StatelessWidget {
           )).toList(),
         );
       },
-    );
-  }
-}
-
-class _SalesCountBySalespersonModal extends StatefulWidget {
-  final String institutionId;
-  final List<UserModel> salespeople;
-  const _SalesCountBySalespersonModal({required this.institutionId, required this.salespeople});
-
-  @override
-  State<_SalesCountBySalespersonModal> createState() => _SalesCountBySalespersonModalState();
-}
-
-class _SalesCountBySalespersonModalState extends State<_SalesCountBySalespersonModal> {
-  late int _selectedMonth;
-  late int _selectedYear;
-  late Future<Map<String, int>> _dataFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    final now = DateTime.now();
-    _selectedMonth = now.month;
-    _selectedYear = now.year;
-    _dataFuture = _fetchData();
-  }
-
-  Future<Map<String, int>> _fetchData() async {
-    final startDate = DateTime(_selectedYear, _selectedMonth, 1);
-    final endDate = DateTime(_selectedYear, _selectedMonth + 1, 0, 23, 59, 59);
-
-    final salesSnapshot = await FirebaseFirestore.instance
-        .collection('institutions').doc(widget.institutionId).collection('sales')
-        .where('saleDate', isGreaterThanOrEqualTo: startDate)
-        .where('saleDate', isLessThanOrEqualTo: endDate)
-        .get();
-
-    final salesCount = <String, int>{};
-    for (var doc in salesSnapshot.docs) {
-      final data = doc.data();
-      final userId = data['userId'] as String;
-      final salespersonName = widget.salespeople.firstWhere((s) => s.id == userId, orElse: () => UserModel(id: '', fullName: 'Desconhecido', email: '', institutionId: '', role: '')).fullName;
-      salesCount[salespersonName] = (salesCount[salespersonName] ?? 0) + 1;
-    }
-    return salesCount;
-  }
-
-  void _onDateChanged() {
-    setState(() {
-      _dataFuture = _fetchData();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final months = List.generate(12, (i) => DateFormat.MMMM('pt_BR').format(DateTime(0, i + 1)));
-    final years = List.generate(5, (i) => DateTime.now().year - i);
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: DropdownButton<int>(
-                value: _selectedMonth,
-                isExpanded: true,
-                items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(months[i]))),
-                onChanged: (value) {
-                  if (value != null) {
-                    _selectedMonth = value;
-                    _onDateChanged();
-                  }
-                },
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: DropdownButton<int>(
-                value: _selectedYear,
-                isExpanded: true,
-                items: years.map((y) => DropdownMenuItem(value: y, child: Text(y.toString()))).toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    _selectedYear = value;
-                    _onDateChanged();
-                  }
-                },
-              ),
-            ),
-          ],
-        ),
-        const Divider(height: 24),
-        FutureBuilder<Map<String, int>>(
-          future: _dataFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-            if (!snapshot.hasData || snapshot.data!.isEmpty) return const Text('Nenhuma venda encontrada para este período.');
-
-            final data = snapshot.data!;
-            final entries = data.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-
-            return ListView(
-              shrinkWrap: true,
-              children: entries.map((entry) => ListTile(
-                title: Text(entry.key),
-                trailing: Text(entry.value.toString()),
-              )).toList(),
-            );
-          },
-        ),
-      ],
     );
   }
 }
@@ -1091,6 +943,650 @@ class _SalesComparisonChartModalState extends State<_SalesComparisonChartModal> 
           ],
         );
       },
+    );
+  }
+}
+
+class _NewClientsByMonthModal extends StatefulWidget {
+  final String institutionId;
+  const _NewClientsByMonthModal({required this.institutionId});
+
+  @override
+  State<_NewClientsByMonthModal> createState() => _NewClientsByMonthModalState();
+}
+
+class _NewClientsByMonthModalState extends State<_NewClientsByMonthModal> {
+  late int _selectedMonth;
+  late int _selectedYear;
+  late Future<QuerySnapshot> _dataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _selectedMonth = now.month;
+    _selectedYear = now.year;
+    _dataFuture = _fetchData();
+  }
+
+  Future<QuerySnapshot> _fetchData() async {
+    final startDate = DateTime(_selectedYear, _selectedMonth, 1);
+    final endDate = DateTime(_selectedYear, _selectedMonth + 1, 0, 23, 59, 59);
+
+    return FirebaseFirestore.instance
+        .collection('institutions').doc(widget.institutionId)
+        .collection('clients')
+        .where('createdOn', isGreaterThanOrEqualTo: startDate)
+        .where('createdOn', isLessThanOrEqualTo: endDate)
+        .orderBy('createdOn', descending: true)
+        .get();
+  }
+
+  void _onDateChanged() {
+    setState(() {
+      _dataFuture = _fetchData();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final months = List.generate(12, (i) => DateFormat.MMMM('pt_BR').format(DateTime(0, i + 1)));
+    final years = List.generate(5, (i) => DateTime.now().year - i);
+    final dateFormatter = DateFormat('dd/MM/yyyy');
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: DropdownButton<int>(
+                value: _selectedMonth,
+                isExpanded: true,
+                items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(months[i]))),
+                onChanged: (value) {
+                  if (value != null) {
+                    _selectedMonth = value;
+                    _onDateChanged();
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: DropdownButton<int>(
+                value: _selectedYear,
+                isExpanded: true,
+                items: years.map((y) => DropdownMenuItem(value: y, child: Text(y.toString()))).toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    _selectedYear = value;
+                    _onDateChanged();
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+        const Divider(height: 24),
+        FutureBuilder<QuerySnapshot>(
+          future: _dataFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+            if (snapshot.hasError) return const Center(child: Text('Erro ao carregar clientes.'));
+
+            final docs = snapshot.data?.docs ?? [];
+            final count = docs.length;
+
+            if (count == 0) {
+              return const Center(child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text('Nenhum cliente novo (0) encontrado para este período.'),
+              ));
+            }
+
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12.0),
+                  child: Text(
+                    'Total de novos clientes: $count',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+                ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: count, // usa a variável 'count'
+                  itemBuilder: (context, index) {
+                    final data = docs[index].data() as Map<String, dynamic>;
+                    final clientName = data['companyName'] ?? 'Cliente sem nome';
+                    String subtitle = 'Data de criação não registrada';
+
+                    if (data['createdOn'] != null) {
+                      final createdOnDate = (data['createdOn'] as Timestamp).toDate();
+                      subtitle = 'Criado em: ${dateFormatter.format(createdOnDate)}';
+                    }
+
+                    return ListTile(
+                      leading: const Icon(Icons.person),
+                      title: Text(clientName),
+                      subtitle: Text(subtitle),
+                    );
+                  },
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+// Modal de Vendas para o VENDEDOR (com seletor de período)
+class _SalespersonSalesModal extends StatefulWidget {
+  final String institutionId;
+  final String userId;
+  const _SalespersonSalesModal({required this.institutionId, required this.userId});
+
+  @override
+  State<_SalespersonSalesModal> createState() => _SalespersonSalesModalState();
+}
+
+class _SalespersonSalesModalState extends State<_SalespersonSalesModal> {
+  // Define o período inicial como Mês
+  SalesModalPeriod _selectedPeriod = SalesModalPeriod.Month;
+  late Future<QuerySnapshot> _dataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _dataFuture = _fetchData();
+  }
+
+  Future<QuerySnapshot> _fetchData() {
+    final now = DateTime.now();
+    DateTime startDate;
+    DateTime endDate = now; // Para Dia e Semana, o fim é agora.
+
+    switch (_selectedPeriod) {
+      case SalesModalPeriod.Day:
+        startDate = DateTime(now.year, now.month, now.day);
+        break;
+      case SalesModalPeriod.Week:
+        final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+        startDate = DateTime(startOfWeek.year, startOfWeek.month, startOfWeek.day);
+        break;
+      case SalesModalPeriod.Month:
+      // Para o vendedor, vamos sempre mostrar o mês corrente
+        startDate = DateTime(now.year, now.month, 1);
+        // E o fim do mês corrente
+        endDate = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
+        break;
+    }
+
+    return FirebaseFirestore.instance
+        .collection('institutions').doc(widget.institutionId)
+        .collection('sales')
+        .where('userId', isEqualTo: widget.userId) // Filtro do vendedor
+        .where('saleDate', isGreaterThanOrEqualTo: startDate)
+        .where('saleDate', isLessThanOrEqualTo: endDate)
+        .orderBy('saleDate', descending: true)
+        .get();
+  }
+
+  void _onPeriodChanged(SalesModalPeriod? value) {
+    if (value != null) {
+      setState(() {
+        _selectedPeriod = value;
+        _dataFuture = _fetchData();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+
+    // ✨ 1. container para limitar a altura
+    return Container(
+      width: double.maxFinite,
+      height: MediaQuery.of(context).size.height * 0.6, // 60% da tela
+      child: Column(
+        // ✨ mainaxissize.min removido
+        children: [
+          // --- SELETORES DE RÁDIO ---
+          RadioListTile<SalesModalPeriod>(
+            title: const Text('Hoje'),
+            value: SalesModalPeriod.Day,
+            groupValue: _selectedPeriod,
+            onChanged: _onPeriodChanged,
+          ),
+          RadioListTile<SalesModalPeriod>(
+            title: const Text('Esta Semana'),
+            value: SalesModalPeriod.Week,
+            groupValue: _selectedPeriod,
+            onChanged: _onPeriodChanged,
+          ),
+          RadioListTile<SalesModalPeriod>(
+            title: const Text('Este Mês'), // Simplificado (só mês corrente)
+            value: SalesModalPeriod.Month,
+            groupValue: _selectedPeriod,
+            onChanged: _onPeriodChanged,
+          ),
+          const Divider(height: 24),
+
+          // ✨ 2. expanded no futurebuilder
+          Expanded(
+            child: FutureBuilder<QuerySnapshot>(
+              future: _dataFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return const Center(child: Text('Erro ao carregar vendas.'));
+                }
+
+                final docs = snapshot.data?.docs ?? [];
+                if (docs.isEmpty) {
+                  return const Center(child: Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Text('Nenhuma venda encontrada para este período.'),
+                  ));
+                }
+
+                // Calcular o total
+                double total = 0;
+                for (var doc in docs) {
+                  total += (doc.data() as Map<String, dynamic>)['totalAmount'] as num? ?? 0;
+                }
+
+                // ✨ 3. column normal
+                return Column(
+                  children: [
+                    // 1. Totalizador
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12.0),
+                      child: Text(
+                        'Total do Período: ${currencyFormatter.format(total)}',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ),
+
+                    // ✨ 4. expanded na listview
+                    Expanded(
+                      child: ListView.builder(
+                        // ✨ shrinkwrap: true removido!
+                        itemCount: docs.length,
+                        itemBuilder: (context, index) {
+                          final data = docs[index].data() as Map<String, dynamic>;
+                          final title = data['clientName']?.toString() ?? 'N/A';
+                          final amount = (data['totalAmount'] as num? ?? 0).toDouble();
+                          final subtitle = currencyFormatter.format(amount);
+
+                          return ListTile(
+                            leading: Icon(Icons.receipt_long, color: Theme.of(context).colorScheme.primary),
+                            title: Text(title),
+                            subtitle: Text(subtitle),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Modal de VALOR de Vendas para o ADMIN (com seletor de período)
+class _SalesValueBySalespersonModal extends StatefulWidget {
+  final String institutionId;
+  final List<UserModel> salespeople;
+  const _SalesValueBySalespersonModal({required this.institutionId, required this.salespeople});
+
+  @override
+  State<_SalesValueBySalespersonModal> createState() => _SalesValueBySalespersonModalState();
+}
+
+class _SalesValueBySalespersonModalState extends State<_SalesValueBySalespersonModal> {
+  late int _selectedMonth;
+  late int _selectedYear;
+  SalesModalPeriod _selectedPeriod = SalesModalPeriod.Month; // estado do rádio
+  late Future<Map<String, double>> _dataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _selectedMonth = now.month;
+    _selectedYear = now.year;
+    _dataFuture = _fetchData();
+  }
+
+  Future<Map<String, double>> _fetchData() async {
+    final now = DateTime.now();
+    DateTime startDate;
+    DateTime endDate;
+
+    // lógica de data baseada no rádio
+    switch (_selectedPeriod) {
+      case SalesModalPeriod.Day:
+        startDate = DateTime(now.year, now.month, now.day);
+        endDate = now;
+        break;
+      case SalesModalPeriod.Week:
+        final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+        startDate = DateTime(startOfWeek.year, startOfWeek.month, startOfWeek.day);
+        endDate = now;
+        break;
+      case SalesModalPeriod.Month:
+        startDate = DateTime(_selectedYear, _selectedMonth, 1);
+        endDate = DateTime(_selectedYear, _selectedMonth + 1, 0, 23, 59, 59);
+        break;
+    }
+
+    final salesSnapshot = await FirebaseFirestore.instance
+        .collection('institutions').doc(widget.institutionId).collection('sales')
+        .where('saleDate', isGreaterThanOrEqualTo: startDate)
+        .where('saleDate', isLessThanOrEqualTo: endDate)
+        .get();
+
+    final salesBySalesperson = <String, double>{};
+    for (var doc in salesSnapshot.docs) {
+      final data = doc.data();
+      final userId = data['userId'] as String;
+      final amount = (data['totalAmount'] as num).toDouble();
+      final salespersonName = widget.salespeople.firstWhere((s) => s.id == userId, orElse: () => UserModel(id: '', fullName: 'Desconhecido', email: '', institutionId: '', role: '')).fullName;
+      salesBySalesperson[salespersonName] = (salesBySalesperson[salespersonName] ?? 0) + amount;
+    }
+    return salesBySalesperson;
+  }
+
+  void _onPeriodChanged(SalesModalPeriod? value) {
+    if (value != null) {
+      setState(() {
+        _selectedPeriod = value;
+        _dataFuture = _fetchData();
+      });
+    }
+  }
+
+  void _onDateChanged() {
+    setState(() {
+      _dataFuture = _fetchData();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final months = List.generate(12, (i) => DateFormat.MMMM('pt_BR').format(DateTime(0, i + 1)));
+    final years = List.generate(5, (i) => DateTime.now().year - i);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // --- seletores de rádio ---
+        RadioListTile<SalesModalPeriod>(
+          title: const Text('Hoje'),
+          value: SalesModalPeriod.Day,
+          groupValue: _selectedPeriod,
+          onChanged: _onPeriodChanged,
+        ),
+        RadioListTile<SalesModalPeriod>(
+          title: const Text('Esta Semana'),
+          value: SalesModalPeriod.Week,
+          groupValue: _selectedPeriod,
+          onChanged: _onPeriodChanged,
+        ),
+        RadioListTile<SalesModalPeriod>(
+          title: const Text('Este Mês (ou selecionar)'),
+          value: SalesModalPeriod.Month,
+          groupValue: _selectedPeriod,
+          onChanged: _onPeriodChanged,
+        ),
+
+        // --- dropdowns de data (só aparecem para 'mês') ---
+        if (_selectedPeriod == SalesModalPeriod.Month)
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButton<int>(
+                  value: _selectedMonth,
+                  isExpanded: true,
+                  items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(months[i]))),
+                  onChanged: (value) {
+                    if (value != null) {
+                      _selectedMonth = value;
+                      _onDateChanged();
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: DropdownButton<int>(
+                  value: _selectedYear,
+                  isExpanded: true,
+                  items: years.map((y) => DropdownMenuItem(value: y, child: Text(y.toString()))).toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      _selectedYear = value;
+                      _onDateChanged();
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+        const Divider(height: 24),
+
+        // --- lista de resultados ---
+        FutureBuilder<Map<String, double>>(
+          future: _dataFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+            if (!snapshot.hasData || snapshot.data!.isEmpty) return const Text('Nenhuma venda encontrada para este período.');
+
+            final data = snapshot.data!;
+            final total = data.values.fold(0.0, (sum, item) => sum + item);
+            final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
+
+            final entries = data.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+
+            return ListView(
+              shrinkWrap: true,
+              children: [
+                ...entries.map((entry) => ListTile(
+                  title: Text(entry.key),
+                  trailing: Text(currencyFormatter.format(entry.value)),
+                )),
+                const Divider(),
+                ListTile(
+                  title: const Text('Total do Período', style: TextStyle(fontWeight: FontWeight.bold)),
+                  trailing: Text(currencyFormatter.format(total), style: const TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+// Modal de CONTAGEM de Vendas para o ADMIN (com seletor de período)
+class _SalesCountBySalespersonModal extends StatefulWidget {
+  final String institutionId;
+  final List<UserModel> salespeople;
+  const _SalesCountBySalespersonModal({required this.institutionId, required this.salespeople});
+
+  @override
+  State<_SalesCountBySalespersonModal> createState() => _SalesCountBySalespersonModalState();
+}
+
+class _SalesCountBySalespersonModalState extends State<_SalesCountBySalespersonModal> {
+  late int _selectedMonth;
+  late int _selectedYear;
+  SalesModalPeriod _selectedPeriod = SalesModalPeriod.Month; // estado do rádio
+  late Future<Map<String, int>> _dataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _selectedMonth = now.month;
+    _selectedYear = now.year;
+    _dataFuture = _fetchData();
+  }
+
+  Future<Map<String, int>> _fetchData() async {
+    final now = DateTime.now();
+    DateTime startDate;
+    DateTime endDate;
+
+    // lógica de data baseada no rádio
+    switch (_selectedPeriod) {
+      case SalesModalPeriod.Day:
+        startDate = DateTime(now.year, now.month, now.day);
+        endDate = now;
+        break;
+      case SalesModalPeriod.Week:
+        final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+        startDate = DateTime(startOfWeek.year, startOfWeek.month, startOfWeek.day);
+        endDate = now;
+        break;
+      case SalesModalPeriod.Month:
+        startDate = DateTime(_selectedYear, _selectedMonth, 1);
+        endDate = DateTime(_selectedYear, _selectedMonth + 1, 0, 23, 59, 59);
+        break;
+    }
+
+    final salesSnapshot = await FirebaseFirestore.instance
+        .collection('institutions').doc(widget.institutionId).collection('sales')
+        .where('saleDate', isGreaterThanOrEqualTo: startDate)
+        .where('saleDate', isLessThanOrEqualTo: endDate)
+        .get();
+
+    final salesCount = <String, int>{};
+    for (var doc in salesSnapshot.docs) {
+      final data = doc.data();
+      final userId = data['userId'] as String;
+      final salespersonName = widget.salespeople.firstWhere((s) => s.id == userId, orElse: () => UserModel(id: '', fullName: 'Desconhecido', email: '', institutionId: '', role: '')).fullName;
+      salesCount[salespersonName] = (salesCount[salespersonName] ?? 0) + 1;
+    }
+    return salesCount;
+  }
+
+  void _onPeriodChanged(SalesModalPeriod? value) {
+    if (value != null) {
+      setState(() {
+        _selectedPeriod = value;
+        _dataFuture = _fetchData();
+      });
+    }
+  }
+
+  void _onDateChanged() {
+    setState(() {
+      _dataFuture = _fetchData();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final months = List.generate(12, (i) => DateFormat.MMMM('pt_BR').format(DateTime(0, i + 1)));
+    final years = List.generate(5, (i) => DateTime.now().year - i);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // --- seletores de rádio ---
+        RadioListTile<SalesModalPeriod>(
+          title: const Text('Hoje'),
+          value: SalesModalPeriod.Day,
+          groupValue: _selectedPeriod,
+          onChanged: _onPeriodChanged,
+        ),
+        RadioListTile<SalesModalPeriod>(
+          title: const Text('Esta Semana'),
+          value: SalesModalPeriod.Week,
+          groupValue: _selectedPeriod,
+          onChanged: _onPeriodChanged,
+        ),
+        RadioListTile<SalesModalPeriod>(
+          title: const Text('Este Mês (ou selecionar)'),
+          value: SalesModalPeriod.Month,
+          groupValue: _selectedPeriod,
+          onChanged: _onPeriodChanged,
+        ),
+
+        // --- dropdowns de data (só aparecem para 'mês') ---
+        if (_selectedPeriod == SalesModalPeriod.Month)
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButton<int>(
+                  value: _selectedMonth,
+                  isExpanded: true,
+                  items: List.generate(12, (i) => DropdownMenuItem(value: i + 1, child: Text(months[i]))),
+                  onChanged: (value) {
+                    if (value != null) {
+                      _selectedMonth = value;
+                      _onDateChanged();
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: DropdownButton<int>(
+                  value: _selectedYear,
+                  isExpanded: true,
+                  items: years.map((y) => DropdownMenuItem(value: y, child: Text(y.toString()))).toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      _selectedYear = value;
+                      _onDateChanged();
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+        const Divider(height: 24),
+
+        // --- lista de resultados ---
+        FutureBuilder<Map<String, int>>(
+          future: _dataFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+            if (!snapshot.hasData || snapshot.data!.isEmpty) return const Text('Nenhuma venda encontrada para este período.');
+
+            final data = snapshot.data!;
+            final entries = data.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+
+            return ListView(
+              shrinkWrap: true,
+              children: entries.map((entry) => ListTile(
+                title: Text(entry.key),
+                trailing: Text(entry.value.toString()),
+              )).toList(),
+            );
+          },
+        ),
+      ],
     );
   }
 }
