@@ -3,7 +3,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:quadra_vendas/pages/admin/register-initial-admin.page.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
 import 'package:quadra_vendas/widgets/elevated-button.widget.dart';
 import 'package:quadra_vendas/widgets/text-form-field.widget.dart';
@@ -112,16 +111,6 @@ class _LoginPageState extends State<LoginPage> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 24),
-                // TextButton(
-                //   child: const Text('Não tem uma conta? Cadastrar Admin'),
-                //   onPressed: () {
-                //     Navigator.push(
-                //         context,
-                //         MaterialPageRoute(
-                //             builder: (context) => const RegisterInitialAdminPage()));
-                //   },
-                // ),
               ],
             ),
           ),

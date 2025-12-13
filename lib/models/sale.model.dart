@@ -21,14 +21,12 @@ class SaleItem {
     'totalPrice': totalPrice,
   };
 
-  // 💡 MELHORIA: Lógica simplificada e mais direta.
   factory SaleItem.fromMap(Map<String, dynamic> map) {
-    // Cria um objeto 'Product' apenas com os dados que foram salvos na venda (um "snapshot").
     final productSnapshot = Product(
       id: map['productId'],
       name: map['productName'] ?? 'Produto não encontrado',
-      salePrice: (map['unitPrice'] as num? ?? 0).toDouble(), // O preço de venda é o preço unitário da época.
-      categoryId: '', // Dados não essenciais para o histórico da venda.
+      salePrice: (map['unitPrice'] as num? ?? 0).toDouble(),
+      categoryId: '',
       categoryName: '',
     );
 
@@ -41,9 +39,9 @@ class SaleItem {
 
 class Sale {
   final String? id;
-  final Client? client; // Objeto completo, usado opcionalmente na criação da venda.
-  final String clientId; // ID do cliente, sempre salvo.
-  final String clientName; // Nome do cliente, sempre salvo.
+  final Client? client;
+  final String clientId;
+  final String clientName;
   final List<SaleItem> items;
   final double totalAmount;
   final String paymentMethod;
@@ -52,11 +50,12 @@ class Sale {
   final String? observations;
   final DateTime saleDate;
   final String userId;
-  final String? salespersonName; // ✨ NOVO: Campo para o nome do vendedor.
+  final String? salespersonName;
+  final bool isDelivered; // ✨ NOVO: Campo para status de entrega
 
   Sale({
     this.id,
-    this.client, // Opcional
+    this.client,
     required this.clientId,
     required this.clientName,
     required this.items,
@@ -67,12 +66,12 @@ class Sale {
     this.observations,
     required this.saleDate,
     required this.userId,
-    this.salespersonName, // ✨ NOVO
+    this.salespersonName,
+    this.isDelivered = false, // ✨ NOVO: Padrão é false (Pendente)
   });
 
   Map<String, dynamic> toFirestore() {
     return {
-      // ✨ CORREÇÃO: Usando os campos garantidos do modelo, em vez de `client!`.
       'clientId': clientId,
       'clientName': clientName,
       'totalAmount': totalAmount,
@@ -83,7 +82,8 @@ class Sale {
       'saleDate': Timestamp.fromDate(saleDate),
       'userId': userId,
       'items': items.map((item) => item.toMap()).toList(),
-      'salespersonName': salespersonName, // ✨ NOVO
+      'salespersonName': salespersonName,
+      'isDelivered': isDelivered, // ✨ NOVO
     };
   }
 
@@ -91,8 +91,6 @@ class Sale {
     final data = doc.data()!;
     return Sale(
       id: doc.id,
-      // ✨ CORREÇÃO: O objeto 'client' não é montado aqui, pois não temos todos os dados dele.
-      // Apenas o ID e o nome são lidos. Se precisar do objeto completo, ele deve ser buscado separadamente.
       client: null,
       clientId: data['clientId'] ?? '',
       clientName: data['clientName'] ?? 'Cliente não encontrado',
@@ -106,7 +104,8 @@ class Sale {
       observations: data['observations'],
       saleDate: (data['saleDate'] as Timestamp).toDate(),
       userId: data['userId'] ?? '',
-      salespersonName: data['salespersonName'], // ✨ NOVO
+      salespersonName: data['salespersonName'],
+      isDelivered: data['isDelivered'] ?? false, // ✨ NOVO: Se for null, assume false
     );
   }
 }

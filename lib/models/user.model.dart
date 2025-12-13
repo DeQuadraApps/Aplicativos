@@ -6,6 +6,7 @@ class UserModel {
   final String email;
   final String role;
   final String institutionId;
+  final Map<String, dynamic> permissions; // ✨ 1. Novo campo adicionado
 
   UserModel({
     required this.id,
@@ -13,6 +14,7 @@ class UserModel {
     required this.email,
     required this.role,
     required this.institutionId,
+    this.permissions = const {}, // ✨ 2. Inicia vazio por padrão para evitar null
   });
 
   factory UserModel.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -23,6 +25,10 @@ class UserModel {
       email: data['email'] ?? '',
       role: data['role'] ?? 'employee',
       institutionId: data['institutionId'] ?? '',
+      // ✨ 3. Converte o Map do Firestore de forma segura
+      permissions: data['permissions'] != null
+          ? Map<String, dynamic>.from(data['permissions'])
+          : {},
     );
   }
 
@@ -33,7 +39,6 @@ class UserModel {
               runtimeType == other.runtimeType &&
               id == other.id;
 
-  // Quando você sobrescreve o ==, você também precisa sobrescrever o hashCode.
   @override
   int get hashCode => id.hashCode;
 }

@@ -60,7 +60,27 @@ class _SalespersonDetailPageState extends State<SalespersonDetailPage>
     }
   }
 
-  // --- Funções de Gestão (copiadas e adaptadas) ---
+  // --- Funções de Gestão ---
+
+  // +++ NOVA FUNÇÃO: Alternar Status de Entrega +++
+  Future<void> _toggleDeliveryStatus(Sale sale) async {
+    final currentStatus = sale.isDelivered;
+    final newStatus = !currentStatus;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('institutions').doc(widget.institutionId)
+          .collection('sales').doc(sale.id)
+          .update({'isDelivered': newStatus});
+
+      if (mounted) {
+        String msg = newStatus ? 'Venda marcada como ENTREGUE.' : 'Venda marcada como PENDENTE.';
+        AppSnackBar.showSuccess(context, message: msg);
+      }
+    } catch (e) {
+      if (mounted) AppSnackBar.showError(context, message: 'Erro ao atualizar status.');
+    }
+  }
 
   void _deleteClient(String clientId) {
     showDialog(
@@ -129,7 +149,9 @@ class _SalespersonDetailPageState extends State<SalespersonDetailPage>
       return;
     }
     final client = Client.fromFirestore(clientDoc as DocumentSnapshot<Map<String, dynamic>>);
-    final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod);
+    // Recriando o objeto Sale completo com o client
+    final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod, isDelivered: sale.isDelivered);
+
     final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName);
     final pdfBytes = await pdfService.generatePdf();
     await Printing.layoutPdf(onLayout: (format) async => pdfBytes);
@@ -144,7 +166,8 @@ class _SalespersonDetailPageState extends State<SalespersonDetailPage>
     }
     final client = Client.fromFirestore(clientDoc as DocumentSnapshot<Map<String, dynamic>>);
     try {
-      final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod);
+      final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod, isDelivered: sale.isDelivered);
+
       final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName);
       final pdfBytes = await pdfService.generatePdf();
       final tempDir = await getTemporaryDirectory();
@@ -214,7 +237,7 @@ class _SalespersonDetailPageState extends State<SalespersonDetailPage>
     );
   }
 
-  /// --- Aba de Clientes Funcional ---
+  /// --- Aba de Clientes ---
   Widget _buildClientsTab() {
     return Scaffold(
       floatingActionButton: FloatingActionButton(
@@ -224,7 +247,7 @@ class _SalespersonDetailPageState extends State<SalespersonDetailPage>
             MaterialPageRoute(
               builder: (context) => AddEditClientPage(
                 institutionId: widget.institutionId,
-                salespersonId: widget.salesperson.id, // ID do vendedor pré-selecionado
+                salespersonId: widget.salesperson.id,
               ),
             ),
           );
@@ -277,7 +300,7 @@ class _SalespersonDetailPageState extends State<SalespersonDetailPage>
     );
   }
 
-  /// --- Aba de Metas Funcional ---
+  /// --- Aba de Metas ---
   Widget _buildGoalsTab() {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
@@ -318,12 +341,10 @@ class _SalespersonDetailPageState extends State<SalespersonDetailPage>
               final goal = goals[index];
               return Stack(
                 children: [
-                  // O card de progresso original
                   Padding(
                     padding: const EdgeInsets.only(top: 8.0),
                     child: GoalProgressCard(key: ValueKey(goal.id), goal: goal, institutionId: widget.institutionId),
                   ),
-                  // +++ Botão de exclusão sobreposto no canto superior direito +++
                   Positioned(
                     top: 0,
                     right: 4,
@@ -342,7 +363,7 @@ class _SalespersonDetailPageState extends State<SalespersonDetailPage>
     );
   }
 
-  /// --- Aba de Vendas Funcional ---
+  /// --- Aba de Vendas (Atualizada) ---
   Widget _buildSalesTab() {
     final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
     final dateFormatter = DateFormat('dd/MM/yyyy');
@@ -360,16 +381,33 @@ class _SalespersonDetailPageState extends State<SalespersonDetailPage>
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('Nenhuma venda registrada por este vendedor.'));
 
         final sales = snapshot.data!.docs.map((doc) => Sale.fromFirestore(doc)).toList();
+
         return ListView.builder(
           padding: const EdgeInsets.all(8),
           itemCount: sales.length,
           itemBuilder: (context, index) {
             final sale = sales[index];
+            final isDelivered = sale.isDelivered; // Propriedade nova
+
             return Card(
               elevation: 2,
               margin: const EdgeInsets.symmetric(vertical: 6),
+              // Visual sutil se entregue
+              shape: isDelivered
+                  ? RoundedRectangleBorder(side: const BorderSide(color: Colors.green, width: 1.5), borderRadius: BorderRadius.circular(12))
+                  : null,
               child: ExpansionTile(
-                title: Text(sale.clientName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                // Ícone na esquerda
+                leading: isDelivered
+                    ? const Icon(Icons.check_circle, color: Colors.green)
+                    : const Icon(Icons.shopping_bag_outlined),
+                title: Text(
+                    sale.clientName,
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: isDelivered ? Colors.green[800] : null
+                    )
+                ),
                 subtitle: Text('Data: ${dateFormatter.format(sale.saleDate)} • Pgto: ${sale.paymentMethod}'),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -382,6 +420,9 @@ class _SalespersonDetailPageState extends State<SalespersonDetailPage>
                       icon: const Icon(Icons.more_vert),
                       onSelected: (value) {
                         switch (value) {
+                          case 'toggle_delivery':
+                            _toggleDeliveryStatus(sale);
+                            break;
                           case 'edit':
                             Navigator.push(context, MaterialPageRoute(builder: (context) => EditSalePage(sale: sale)));
                             break;
@@ -397,10 +438,23 @@ class _SalespersonDetailPageState extends State<SalespersonDetailPage>
                         }
                       },
                       itemBuilder: (context) => [
-                        const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
-                        const PopupMenuItem(value: 'pdf', child: ListTile(leading: Icon(Icons.picture_as_pdf_outlined), title: Text('Ver PDF'))),
-                        const PopupMenuItem(value: 'share', child: ListTile(leading: Icon(Icons.share_outlined), title: Text('Partilhar'))),
-                        const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_forever_outlined, color: Colors.red), title: Text('Excluir', style: TextStyle(color: Colors.red)))),
+                        // +++ OPÇÃO DE ENTREGUE / PENDENTE +++
+                        PopupMenuItem(
+                          value: 'toggle_delivery',
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(
+                                isDelivered ? Icons.cancel_outlined : Icons.check_circle_outline,
+                                color: isDelivered ? Colors.orange : Colors.green
+                            ),
+                            title: Text(isDelivered ? 'Marcar como Pendente' : 'Marcar como Entregue'),
+                          ),
+                        ),
+                        const PopupMenuDivider(),
+                        const PopupMenuItem(value: 'edit', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
+                        const PopupMenuItem(value: 'pdf', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.picture_as_pdf_outlined), title: Text('Ver PDF'))),
+                        const PopupMenuItem(value: 'share', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.share_outlined), title: Text('Partilhar'))),
+                        const PopupMenuItem(value: 'delete', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.delete_forever_outlined, color: Colors.red), title: Text('Excluir', style: TextStyle(color: Colors.red)))),
                       ],
                     ),
                   ],

@@ -13,7 +13,7 @@ import 'package:printing/printing.dart';
 import 'package:quadra_vendas/models/client.model.dart';
 import 'package:quadra_vendas/models/product.model.dart';
 import 'package:quadra_vendas/models/sale.model.dart';
-import 'package:quadra_vendas/models/user.model.dart'; // ✨ IMPORTAR O MODELO DE USUÁRIO
+import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/pages/clients/add-edit-client.page.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
 import 'package:share_plus/share_plus.dart';
@@ -45,7 +45,8 @@ class _DirectSalePageState extends State<DirectSalePage> {
   final _observationsController = TextEditingController();
   bool _isLoading = true;
 
-  // ✨ NOVOS ESTADOS PARA GERENCIAR USUÁRIOS E FUNÇÕES
+  // ✨ ESTADOS DO USUÁRIO
+  UserModel? _currentUserData; // Armazena o objeto completo para verificar permissões
   String _currentUserRole = '';
   String _currentUserName = '';
   List<UserModel> _salespeopleList = [];
@@ -66,6 +67,13 @@ class _DirectSalePageState extends State<DirectSalePage> {
     super.dispose();
   }
 
+  // +++ HELPER: Verifica Permissão de Alterar Preço +++
+  bool get _canChangePrice {
+    if (_currentUserData == null) return false;
+    if (_currentUserData!.role == 'admin') return true;
+    return _currentUserData!.permissions['canChangePrice'] == true;
+  }
+
   Future<void> _loadInitialData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -74,7 +82,7 @@ class _DirectSalePageState extends State<DirectSalePage> {
     }
     try {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      final userData = UserModel.fromFirestore(userDoc); // ✨ Usar o modelo de usuário
+      final userData = UserModel.fromFirestore(userDoc);
       final institutionId = userData.institutionId;
 
       if(institutionId == null) {
@@ -85,7 +93,6 @@ class _DirectSalePageState extends State<DirectSalePage> {
       final instDoc = await FirebaseFirestore.instance.collection('institutions').doc(institutionId).get();
       final adminId = instDoc.data()?['ownerId'];
 
-      // ✨ BUSCAR LISTA DE VENDEDORES SE O USUÁRIO FOR ADMIN
       if (userData.role == 'admin') {
         final salespeopleSnapshot = await FirebaseFirestore.instance
             .collection('users')
@@ -96,7 +103,6 @@ class _DirectSalePageState extends State<DirectSalePage> {
             .map((doc) => UserModel.fromFirestore(doc))
             .toList();
 
-        // Define o admin como o vendedor padrão selecionado
         _selectedSalespersonForSale = userData;
       }
 
@@ -119,7 +125,9 @@ class _DirectSalePageState extends State<DirectSalePage> {
           _institutionName = instDoc.data()?['name'] ?? '';
           _allProducts = combinedProducts;
           _filteredProducts = _allProducts;
+
           // ✨ SALVAR DADOS DO USUÁRIO ATUAL
+          _currentUserData = userData; // Salva o objeto completo
           _currentUserRole = userData.role;
           _currentUserName = userData.fullName;
           _isLoading = false;
@@ -134,7 +142,6 @@ class _DirectSalePageState extends State<DirectSalePage> {
     }
   }
 
-  // ... (métodos _onClientSelected, _filterProducts, _updateSaleItem, _currentTotal permanecem os mesmos) ...
   void _onClientSelected(Client client) {
     setState(() {
       _selectedClient = client;
@@ -175,7 +182,6 @@ class _DirectSalePageState extends State<DirectSalePage> {
   }
 
   Future<void> _finalizeSale() async {
-    // ✨ VALIDAÇÃO ADICIONAL PARA ADMIN
     if (_currentUserRole == 'admin' && _selectedSalespersonForSale == null) {
       AppSnackBar.showError(context, message: 'Como administrador, você deve selecionar um vendedor.');
       return;
@@ -188,7 +194,6 @@ class _DirectSalePageState extends State<DirectSalePage> {
 
     setState(() => _isLoading = true);
 
-    // ✨ LÓGICA PARA DEFINIR O NOME E ID DO VENDEDOR
     String? finalSalespersonName;
     String finalUserId;
     if (_currentUserRole == 'admin') {
@@ -211,7 +216,7 @@ class _DirectSalePageState extends State<DirectSalePage> {
       observations: _observationsController.text.trim(),
       saleDate: DateTime.now(),
       userId: finalUserId,
-      salespersonName: finalSalespersonName, // ✨ SALVANDO O NOME CORRETO
+      salespersonName: finalSalespersonName,
     );
 
     try {
@@ -229,7 +234,7 @@ class _DirectSalePageState extends State<DirectSalePage> {
         observations: sale.observations,
         saleDate: sale.saleDate,
         userId: sale.userId,
-        salespersonName: sale.salespersonName, // ✨ Passar o nome para o PDF
+        salespersonName: sale.salespersonName,
       );
 
       final pdfService = PdfSaleService(sale: saleWithId, institutionName: _institutionName);
@@ -241,12 +246,12 @@ class _DirectSalePageState extends State<DirectSalePage> {
       }
     } catch (e) {
       if (mounted) AppSnackBar.showError(context, message: 'Erro ao finalizar a venda: ${e.toString()}');
+      print(e.toString());
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // ... (métodos _handleNextStep, _sharePdf, _showPostSaleDialog permanecem os mesmos) ...
   void _handleNextStep() {
     if (_isLoading) return;
 
@@ -342,7 +347,6 @@ class _DirectSalePageState extends State<DirectSalePage> {
         currentStep: _currentStep,
         onStepTapped: (step) => setState(() => _currentStep = step),
         controlsBuilder: (context, details) {
-          // Os controles do Stepper agora são o FloatingActionButton
           return Container();
         },
         onStepContinue: _handleNextStep,
@@ -370,7 +374,6 @@ class _DirectSalePageState extends State<DirectSalePage> {
     );
   }
 
-  // ... (widgets _buildClientStep e _buildProductsStep permanecem os mesmos) ...
   Widget _buildClientStep() {
     return Form(
       key: _clientFormKey,
@@ -406,7 +409,6 @@ class _DirectSalePageState extends State<DirectSalePage> {
 
                 final searchEnd = '$queryText\uf8ff';
 
-                // Executa as buscas por texto
                 final nameQuery = clientsRef
                     .where('companyName', isGreaterThanOrEqualTo: queryText)
                     .where('companyName', isLessThanOrEqualTo: searchEnd)
@@ -424,7 +426,6 @@ class _DirectSalePageState extends State<DirectSalePage> {
 
                 final results = await Future.wait([nameQuery, cityQuery, cnpjQuery]);
 
-                // Junta os resultados e remove duplicados
                 final allDocs = <String, DocumentSnapshot<Map<String, dynamic>>>{};
                 for (final snapshot in results) {
                   for (final doc in snapshot.docs) {
@@ -432,14 +433,11 @@ class _DirectSalePageState extends State<DirectSalePage> {
                   }
                 }
 
-                // Mapeia para objetos Client
                 var clients = allDocs.values.map((doc) => Client.fromFirestore(doc));
 
-                // Aplica o filtro de vendedor no código Dart
                 if (_currentUserRole != 'admin') {
                   final currentUser = FirebaseAuth.instance.currentUser;
                   if (currentUser != null) {
-                    // ✨ AQUI ESTÁ A CORREÇÃO PRINCIPAL ✨
                     clients = clients.where((client) => client.salespersonId == currentUser.uid).toList();
                   }
                 }
@@ -487,6 +485,8 @@ class _DirectSalePageState extends State<DirectSalePage> {
               product: product,
               key: ValueKey(product.id),
               initialItem: _saleItemsMap[product.id],
+              // ✨ PASSAMOS A PERMISSÃO PARA O WIDGET FILHO
+              canChangePrice: _canChangePrice,
               onChanged: (quantity, price) {
                 _updateSaleItem(product, quantity, price);
               },
@@ -502,7 +502,6 @@ class _DirectSalePageState extends State<DirectSalePage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 10),
-        // ✨ SELETOR DE VENDEDOR PARA ADMINS
         if (_currentUserRole == 'admin') ...[
           DropdownButtonFormField<UserModel>(
             value: _selectedSalespersonForSale,
@@ -529,12 +528,21 @@ class _DirectSalePageState extends State<DirectSalePage> {
   }
 }
 
-// ... (Widget ProductSaleItem permanece o mesmo)
 class ProductSaleItem extends StatefulWidget {
   final Product product;
   final SaleItem? initialItem;
+  // ✨ NOVO PARÂMETRO
+  final bool canChangePrice;
   final Function(int quantity, double price) onChanged;
-  const ProductSaleItem({super.key, required this.product, this.initialItem, required this.onChanged});
+
+  const ProductSaleItem({
+    super.key,
+    required this.product,
+    this.initialItem,
+    required this.onChanged,
+    this.canChangePrice = false, // Default false por segurança
+  });
+
   @override
   State<ProductSaleItem> createState() => _ProductSaleItemState();
 }
@@ -555,7 +563,6 @@ class _ProductSaleItemState extends State<ProductSaleItem> {
   @override
   void didUpdateWidget(covariant ProductSaleItem oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Garante que o estado do checkbox se mantenha ao pesquisar
     if(widget.initialItem != null && !_isSelected) {
       setState(() {
         _isSelected = true;
@@ -633,7 +640,15 @@ class _ProductSaleItemState extends State<ProductSaleItem> {
                       flex: 3,
                       child: TextFormField(
                         controller: _priceController,
-                        decoration: const InputDecoration(labelText: 'Preço Unit.', prefixText: 'R\$ ', border: OutlineInputBorder()),
+                        // ✨ APLICAÇÃO DA PERMISSÃO
+                        readOnly: !widget.canChangePrice,
+                        decoration: InputDecoration(
+                          labelText: 'Preço Unit.',
+                          prefixText: 'R\$ ',
+                          border: const OutlineInputBorder(),
+                          // Mostra cadeado se não puder editar
+                          suffixIcon: !widget.canChangePrice ? const Icon(Icons.lock, size: 16) : null,
+                        ),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         onChanged: (_) => _triggerChange(),
                       ),

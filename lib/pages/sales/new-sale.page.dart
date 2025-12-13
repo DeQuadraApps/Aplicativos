@@ -11,7 +11,7 @@ import 'package:printing/printing.dart';
 import 'package:quadra_vendas/models/client.model.dart';
 import 'package:quadra_vendas/models/product.model.dart';
 import 'package:quadra_vendas/models/sale.model.dart';
-import 'package:quadra_vendas/models/user.model.dart'; // ✨ IMPORTAR O MODELO DE USUÁRIO
+import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/pages/clients/add-edit-client.page.dart';
 import 'package:quadra_vendas/services/pdf-sale.service.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
@@ -41,7 +41,8 @@ class _NewSalePageState extends State<NewSalePage> {
   final _paymentMethodController = TextEditingController();
   final _finalizeFormKey = GlobalKey<FormState>();
 
-  // ✨ NOVOS ESTADOS PARA GERENCIAR USUÁRIOS E FUNÇÕES
+  // ✨ ESTADOS DO USUÁRIO
+  UserModel? _currentUserData; // Armazena o objeto completo para verificar permissões
   String _currentUserRole = '';
   String _currentUserName = '';
   List<UserModel> _salespeopleList = [];
@@ -62,6 +63,14 @@ class _NewSalePageState extends State<NewSalePage> {
     super.dispose();
   }
 
+  // +++ HELPER: Verifica Permissão de Alterar Preço +++
+  bool get _canChangePrice {
+    if (_currentUserData == null) return false;
+    if (_currentUserData!.role == 'admin') return true;
+    // Verifica se a permissão 'canChangePrice' é true no Map de permissões
+    return _currentUserData!.permissions['canChangePrice'] == true;
+  }
+
   Future<void> _loadInitialData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -70,7 +79,7 @@ class _NewSalePageState extends State<NewSalePage> {
     }
     try {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      final userData = UserModel.fromFirestore(userDoc); // ✨ Usar o modelo de usuário
+      final userData = UserModel.fromFirestore(userDoc);
       final institutionId = userData.institutionId;
 
       if(institutionId == null) {
@@ -81,19 +90,16 @@ class _NewSalePageState extends State<NewSalePage> {
       final instDoc = await FirebaseFirestore.instance.collection('institutions').doc(institutionId).get();
       final adminId = instDoc.data()?['ownerId'];
 
-      // ✨ BUSCAR LISTA DE VENDEDORES SE O USUÁRIO FOR ADMIN
       if (userData.role == 'admin') {
         final salespeopleSnapshot = await FirebaseFirestore.instance
             .collection('users')
             .where('institutionId', isEqualTo: institutionId)
             .get();
 
-        // Inclui o próprio admin como uma opção de vendedor
         _salespeopleList = salespeopleSnapshot.docs
             .map((doc) => UserModel.fromFirestore(doc))
             .toList();
 
-        // Define o admin como o vendedor padrão selecionado
         _selectedSalespersonForSale = userData;
       }
 
@@ -116,7 +122,7 @@ class _NewSalePageState extends State<NewSalePage> {
           _institutionName = instDoc.data()?['name'] ?? '';
           _allProducts = combinedProducts;
           _filteredProducts = _allProducts;
-          // ✨ SALVAR DADOS DO USUÁRIO ATUAL
+          _currentUserData = userData; // ✨ Armazena o user completo
           _currentUserRole = userData.role;
           _currentUserName = userData.fullName;
           _isLoading = false;
@@ -131,7 +137,6 @@ class _NewSalePageState extends State<NewSalePage> {
     }
   }
 
-  // ... (outros métodos como _onClientSelected, _filterProducts, _addToCart, etc., permanecem os mesmos) ...
   void _onClientSelected(Client client) {
     setState(() {
       _selectedClient = client;
@@ -211,7 +216,6 @@ class _NewSalePageState extends State<NewSalePage> {
   Future<void> _finalizeSale() async {
     if (!_finalizeFormKey.currentState!.validate()) return;
 
-    // ✨ VALIDAÇÃO ADICIONAL PARA ADMIN
     if (_currentUserRole == 'admin' && _selectedSalespersonForSale == null) {
       AppSnackBar.showError(context, message: 'Como administrador, você deve selecionar um vendedor.');
       return;
@@ -228,7 +232,6 @@ class _NewSalePageState extends State<NewSalePage> {
 
     setState(() => _isLoading = true);
 
-    // ✨ LÓGICA PARA DEFINIR O NOME DO VENDEDOR
     String? finalSalespersonName;
     if (_currentUserRole == 'admin') {
       finalSalespersonName = _selectedSalespersonForSale!.fullName;
@@ -249,7 +252,7 @@ class _NewSalePageState extends State<NewSalePage> {
       saleDate: DateTime.now(),
       userId: _currentUserRole == 'admin' ? _selectedSalespersonForSale!.id! : FirebaseAuth.instance.currentUser!.uid,
       paymentMethod: _paymentMethodController.text.trim(),
-      salespersonName: finalSalespersonName, // ✨ SALVANDO O NOME CORRETO
+      salespersonName: finalSalespersonName,
     );
 
     try {
@@ -257,7 +260,6 @@ class _NewSalePageState extends State<NewSalePage> {
           .collection('institutions').doc(_institutionId!)
           .collection('sales').add(sale.toFirestore());
 
-      // Recriar o objeto Sale com o ID para passar para o PDF
       final saleWithId = Sale(
         id: saleDocRef.id,
         client: sale.client,
@@ -271,7 +273,7 @@ class _NewSalePageState extends State<NewSalePage> {
         saleDate: sale.saleDate,
         userId: sale.userId,
         paymentMethod: sale.paymentMethod,
-        salespersonName: sale.salespersonName, // ✨ Passar o nome para o PDF
+        salespersonName: sale.salespersonName,
       );
 
       final pdfService = PdfSaleService(sale: saleWithId, institutionName: _institutionName);
@@ -283,13 +285,19 @@ class _NewSalePageState extends State<NewSalePage> {
       }
     } catch (e) {
       if (mounted) AppSnackBar.showError(context, message: 'Erro ao finalizar a venda: ${e.toString()}');
+      print(e.toString());
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // ... (métodos _showEditPriceDialog e _showEditQuantityDialog permanecem os mesmos) ...
   Future<void> _showEditPriceDialog(SaleItem item) async {
+    // +++ APLICAÇÃO DA PERMISSÃO NO DIALOG +++
+    if (!_canChangePrice) {
+      AppSnackBar.showError(context, message: 'Você não tem permissão para alterar preços.');
+      return;
+    }
+
     final priceController = TextEditingController(text: item.unitPrice.toStringAsFixed(2));
     final formKey = GlobalKey<FormState>();
 
@@ -370,7 +378,6 @@ class _NewSalePageState extends State<NewSalePage> {
 
   @override
   Widget build(BuildContext context) {
-    // ... (o início do build permanece o mesmo) ...
     final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
@@ -408,8 +415,7 @@ class _NewSalePageState extends State<NewSalePage> {
               AppSnackBar.showError(context, message: 'Adicione pelo menos um produto ao carrinho.');
               isStepValid = false;
             } else if (_currentStep == 2) {
-              // A validação do formulário e do seletor de vendedor (se admin)
-              // será feita dentro de _finalizeSale()
+              // Validação ao finalizar
             }
 
             if (isStepValid) {
@@ -435,7 +441,6 @@ class _NewSalePageState extends State<NewSalePage> {
     );
   }
 
-  // ... (widgets _buildClientStep e _buildProductsStep permanecem os mesmos) ...
   Widget _buildClientStep() {
     return Column(
       children: [
@@ -477,7 +482,6 @@ class _NewSalePageState extends State<NewSalePage> {
 
             final searchEnd = '$queryText\uf8ff';
 
-            // Executa as buscas por texto
             final nameQuery = clientsRef
                 .where('companyName', isGreaterThanOrEqualTo: queryText)
                 .where('companyName', isLessThanOrEqualTo: searchEnd)
@@ -495,7 +499,6 @@ class _NewSalePageState extends State<NewSalePage> {
 
             final results = await Future.wait([nameQuery, cityQuery, cnpjQuery]);
 
-            // Junta os resultados e remove duplicados
             final allDocs = <String, DocumentSnapshot<Map<String, dynamic>>>{};
             for (final snapshot in results) {
               for (final doc in snapshot.docs) {
@@ -503,14 +506,11 @@ class _NewSalePageState extends State<NewSalePage> {
               }
             }
 
-            // Mapeia para objetos Client
             var clients = allDocs.values.map((doc) => Client.fromFirestore(doc));
 
-            // Aplica o filtro de vendedor no código Dart
             if (_currentUserRole != 'admin') {
               final currentUser = FirebaseAuth.instance.currentUser;
               if (currentUser != null) {
-                // ✨ AQUI ESTÁ A CORREÇÃO PRINCIPAL ✨
                 clients = clients.where((client) => client.salespersonId == currentUser.uid).toList();
               }
             }
@@ -582,12 +582,25 @@ class _NewSalePageState extends State<NewSalePage> {
                 return ListTile(
                   title: Text(item.product.name),
                   subtitle: InkWell(
+                    // ✨ Só abre o dialog se tiver permissão (senão, mostra erro dentro do dialog func ou nem faz nada)
+                    // No código acima, eu deixei o onTap ativo, mas a validação ocorre DENTRO do _showEditPriceDialog
+                    // para dar feedback ao usuário de "Acesso Negado".
                     onTap: () => _showEditPriceDialog(item),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4.0),
-                      child: Text(
-                        '${currencyFormatter.format(item.unitPrice)} (Toque para editar)',
-                        style: TextStyle(color: Theme.of(context).colorScheme.primary),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${currencyFormatter.format(item.unitPrice)} ',
+                            style: TextStyle(color: Theme.of(context).colorScheme.primary),
+                          ),
+                          // ✨ Ícone visual indicando se pode editar
+                          if (_canChangePrice)
+                            const Icon(Icons.edit, size: 14, color: Colors.grey)
+                          else
+                            const Icon(Icons.lock, size: 14, color: Colors.grey),
+                        ],
                       ),
                     ),
                   ),
@@ -625,7 +638,6 @@ class _NewSalePageState extends State<NewSalePage> {
           Text('Total da Venda: ${currencyFormatter.format(total)}', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 20),
 
-          // ✨ SELETOR DE VENDEDOR PARA ADMINS
           if (_currentUserRole == 'admin') ...[
             DropdownButtonFormField<UserModel>(
               value: _selectedSalespersonForSale,

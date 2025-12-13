@@ -1,3 +1,5 @@
+// lib/pages/sales/sales-list.page.dart
+
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -26,7 +28,7 @@ class _SalesListPageState extends State<SalesListPage> {
   UserModel? _currentUserData;
   Stream<QuerySnapshot<Map<String, dynamic>>>? _salesStream;
 
-  // ✨ 1. ESTADOS PARA A PESQUISA
+  // ✨ ESTADOS PARA A PESQUISA
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -34,7 +36,6 @@ class _SalesListPageState extends State<SalesListPage> {
   void initState() {
     super.initState();
     _initializeUserDataAndStream();
-    // Adiciona um listener para atualizar a UI quando o texto de pesquisa mudar
     _searchController.addListener(() {
       setState(() {
         _searchQuery = _searchController.text;
@@ -42,11 +43,24 @@ class _SalesListPageState extends State<SalesListPage> {
     });
   }
 
-  // ✨ Não esqueça de fazer o dispose do controller
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  // +++ HELPER: Verifica Permissão de Deletar +++
+  bool get _canDeleteSale {
+    if (_currentUserData == null) return false;
+    if (_currentUserData!.role == 'admin') return true;
+    return _currentUserData!.permissions['canDeleteSale'] == true;
+  }
+
+  // +++ HELPER: Verifica Permissão de Marcar Entregue +++
+  bool get _canMarkDelivered {
+    if (_currentUserData == null) return false;
+    if (_currentUserData!.role == 'admin') return true;
+    return _currentUserData!.permissions['canMarkDelivered'] == true;
   }
 
   Future<void> _initializeUserDataAndStream() async {
@@ -84,8 +98,40 @@ class _SalesListPageState extends State<SalesListPage> {
     }
   }
 
-  // ... (seus outros métodos _deleteSale, _fetchFullClient, etc. continuam os mesmos)
+  Future<void> _toggleDeliveryStatus(Sale sale) async {
+    // +++ VERIFICAÇÃO DE PERMISSÃO ANTES DA AÇÃO +++
+    if (!_canMarkDelivered) {
+      AppSnackBar.showError(context, message: 'Você não tem permissão para alterar o status de entrega.');
+      return;
+    }
+
+    if (_institutionId == null) return;
+
+    final currentStatus = sale.isDelivered;
+    final newStatus = !currentStatus;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('institutions').doc(_institutionId)
+          .collection('sales').doc(sale.id)
+          .update({'isDelivered': newStatus});
+
+      if (mounted) {
+        String msg = newStatus ? 'Venda marcada como ENTREGUE.' : 'Venda marcada como PENDENTE.';
+        AppSnackBar.showSuccess(context, message: msg);
+      }
+    } catch (e) {
+      if (mounted) AppSnackBar.showError(context, message: 'Erro ao atualizar status.');
+    }
+  }
+
   void _deleteSale(String saleId) {
+    // +++ VERIFICAÇÃO DE PERMISSÃO ANTES DA AÇÃO +++
+    if (!_canDeleteSale) {
+      AppSnackBar.showError(context, message: 'Você não tem permissão para excluir vendas.');
+      return;
+    }
+
     if (_institutionId == null) return;
     showDialog(
       context: context,
@@ -127,7 +173,8 @@ class _SalesListPageState extends State<SalesListPage> {
       if (mounted) AppSnackBar.showError(context, message: 'Cliente desta venda não encontrado.');
       return;
     }
-    final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod, salespersonName: sale.salespersonName);
+    final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod, salespersonName: sale.salespersonName, isDelivered: sale.isDelivered);
+
     final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName);
     final pdfBytes = await pdfService.generatePdf();
     await Printing.layoutPdf(onLayout: (format) async => pdfBytes);
@@ -141,7 +188,8 @@ class _SalesListPageState extends State<SalesListPage> {
       return;
     }
     try {
-      final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod, salespersonName: sale.salespersonName);
+      final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod, salespersonName: sale.salespersonName, isDelivered: sale.isDelivered);
+
       final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName);
       final pdfBytes = await pdfService.generatePdf();
       final tempDir = await getTemporaryDirectory();
@@ -162,9 +210,8 @@ class _SalesListPageState extends State<SalesListPage> {
 
     return Scaffold(
       appBar: AppBar(title: Text(_currentUserData?.role == 'admin' ? 'Histórico de Vendas' : 'Minhas Vendas')),
-      body: Column( // ✨ Adicionado Column para acomodar a pesquisa e a lista
+      body: Column(
         children: [
-          // ✨ 2. CAMPO DE PESQUISA
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: TextField(
@@ -184,7 +231,7 @@ class _SalesListPageState extends State<SalesListPage> {
               ),
             ),
           ),
-          // ✨ Envolve o StreamBuilder com Expanded
+
           Expanded(
             child: _salesStream == null
                 ? const Center(child: CircularProgressIndicator())
@@ -192,24 +239,18 @@ class _SalesListPageState extends State<SalesListPage> {
               stream: _salesStream,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
-                  debugPrint("ERRO AO CARREGAR VENDAS: ${snapshot.error}");
-                  return Center(child: Text("Erro ao carregar vendas. Verifique o console."));
+                  return const Center(child: Text("Erro ao carregar vendas."));
                 }
                 if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('Nenhuma venda registrada ainda.'));
 
                 final allSales = snapshot.data!.docs.map((doc) => Sale.fromFirestore(doc)).toList();
 
-                // ✨ 3. APLICANDO O FILTRO
                 final filteredSales = allSales.where((sale) {
-                  if (_searchQuery.isEmpty) {
-                    return true; // Mostra todos se a pesquisa estiver vazia
-                  }
+                  if (_searchQuery.isEmpty) return true;
                   final queryLower = _searchQuery.toLowerCase();
                   final clientNameLower = sale.clientName.toLowerCase();
                   final formattedDate = dateFormatter.format(sale.saleDate);
-
-                  // Verifica se o nome do cliente OU a data formatada contêm o texto da pesquisa
                   return clientNameLower.contains(queryLower) || formattedDate.contains(queryLower);
                 }).toList();
 
@@ -219,14 +260,28 @@ class _SalesListPageState extends State<SalesListPage> {
 
                 return ListView.builder(
                   padding: const EdgeInsets.all(8),
-                  itemCount: filteredSales.length, // Usa a lista filtrada
+                  itemCount: filteredSales.length,
                   itemBuilder: (context, index) {
-                    final sale = filteredSales[index]; // Usa a lista filtrada
+                    final sale = filteredSales[index];
+                    final isDelivered = sale.isDelivered;
+
                     return Card(
                       elevation: 2,
                       margin: const EdgeInsets.symmetric(vertical: 6),
+                      shape: isDelivered
+                          ? RoundedRectangleBorder(side: const BorderSide(color: Colors.green, width: 1.5), borderRadius: BorderRadius.circular(12))
+                          : null,
                       child: ExpansionTile(
-                        title: Text(sale.clientName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        leading: isDelivered
+                            ? const Icon(Icons.check_circle, color: Colors.green)
+                            : const Icon(Icons.shopping_bag_outlined),
+                        title: Text(
+                            sale.clientName,
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: isDelivered ? Colors.green[800] : null
+                            )
+                        ),
                         subtitle: Text('Data: ${dateFormatter.format(sale.saleDate)} • Pgto: ${sale.paymentMethod}'),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -239,6 +294,9 @@ class _SalesListPageState extends State<SalesListPage> {
                               icon: const Icon(Icons.more_vert),
                               onSelected: (value) {
                                 switch (value) {
+                                  case 'toggle_delivery':
+                                    _toggleDeliveryStatus(sale);
+                                    break;
                                   case 'edit':
                                     Navigator.push(context, MaterialPageRoute(builder: (context) => EditSalePage(sale: sale)));
                                     break;
@@ -253,12 +311,44 @@ class _SalesListPageState extends State<SalesListPage> {
                                     break;
                                 }
                               },
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
-                                const PopupMenuItem(value: 'pdf', child: ListTile(leading: Icon(Icons.picture_as_pdf_outlined), title: Text('Ver PDF'))),
-                                const PopupMenuItem(value: 'share', child: ListTile(leading: Icon(Icons.share_outlined), title: Text('Partilhar'))),
-                                const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_forever_outlined, color: Colors.red), title: Text('Excluir', style: TextStyle(color: Colors.red)))),
-                              ],
+                              itemBuilder: (context) {
+                                // +++ FILTRA OS ITENS DO MENU BASEADO NA PERMISSÃO +++
+                                final List<PopupMenuEntry<String>> menuItems = [];
+
+                                // 1. Marcar Entregue
+                                if (_canMarkDelivered) {
+                                  menuItems.add(
+                                    PopupMenuItem(
+                                      value: 'toggle_delivery',
+                                      child: ListTile(
+                                        contentPadding: EdgeInsets.zero,
+                                        leading: Icon(
+                                            isDelivered ? Icons.cancel_outlined : Icons.check_circle_outline,
+                                            color: isDelivered ? Colors.orange : Colors.green
+                                        ),
+                                        title: Text(isDelivered ? 'Marcar como Pendente' : 'Marcar como Entregue'),
+                                      ),
+                                    ),
+                                  );
+                                  menuItems.add(const PopupMenuDivider());
+                                }
+
+                                // 2. Itens Comuns
+                                menuItems.addAll([
+                                  const PopupMenuItem(value: 'edit', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
+                                  const PopupMenuItem(value: 'pdf', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.picture_as_pdf_outlined), title: Text('Ver PDF'))),
+                                  const PopupMenuItem(value: 'share', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.share_outlined), title: Text('Partilhar'))),
+                                ]);
+
+                                // 3. Excluir
+                                if (_canDeleteSale) {
+                                  menuItems.add(
+                                    const PopupMenuItem(value: 'delete', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.delete_forever_outlined, color: Colors.red), title: Text('Excluir', style: TextStyle(color: Colors.red)))),
+                                  );
+                                }
+
+                                return menuItems;
+                              },
                             ),
                           ],
                         ),

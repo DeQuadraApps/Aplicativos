@@ -5,6 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:quadra_vendas/pages/expiredLicense/expired-license.page.dart';
 import 'package:quadra_vendas/pages/home/home-page.dart';
 import 'package:quadra_vendas/pages/login/login-page.dart';
+// Importe a sua nova tela de Admin
+import 'package:quadra_vendas/pages/superAdmin/manage-institutions.page.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -14,63 +16,57 @@ class AuthGate extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, authSnapshot) {
-        // Se o utilizador não está logado, mostra a tela de login
+        // Se o utilizador não está logado
         if (!authSnapshot.hasData) {
           return const LoginPage();
         }
 
-        // Se o utilizador ESTÁ logado, obtemos o objeto User
         final user = authSnapshot.data!;
 
-        // Usamos um FutureBuilder para obter os dados do utilizador UMA VEZ.
-        // Isto é mais estável para a lógica de redirecionamento do que um Stream.
         return FutureBuilder<DocumentSnapshot>(
           future: FirebaseFirestore.instance.collection('users').doc(user.uid).get(),
           builder: (context, userDocSnapshot) {
 
-            // Enquanto os dados do utilizador carregam, mostramos um loader.
             if (userDocSnapshot.connectionState == ConnectionState.waiting) {
               return const Scaffold(body: Center(child: CircularProgressIndicator()));
             }
 
-            // Se o documento do utilizador não existe, algo correu mal ou o registo não terminou.
-            // Para ser seguro, deslogamos o utilizador para que ele possa tentar novamente.
             if (!userDocSnapshot.hasData || !userDocSnapshot.data!.exists) {
-              // Isto previne o loop infinito se o documento ainda não foi criado.
-              // O ideal é que o utilizador tente fazer login novamente após um segundo.
               FirebaseAuth.instance.signOut();
               return const LoginPage();
             }
 
             final userData = userDocSnapshot.data!.data() as Map<String, dynamic>;
-            final institutionId = userData['institutionId'];
             final userStatus = userData['status'];
+            final role = userData['role']; // Capturamos o role
 
-            // VERIFICAÇÃO DE SEGURANÇA: Se o utilizador foi desativado
+            // 1. SEGURANÇA GLOBAL: Verifica se está ativo
             if (userStatus == 'inactive') {
-              // Se o utilizador estiver inativo, desloga-o e não o deixa prosseguir.
               FirebaseAuth.instance.signOut();
-              // A tela de login já mostra a mensagem de erro apropriada.
               return const LoginPage();
             }
 
-            // Se o utilizador não tem uma instituição vinculada, isto é um estado de erro.
-            // O fluxo de registo do admin DEVE criar a instituição.
+            // 2. ROTEAMENTO DE SUPER ADMIN (Novo)
+            // Se for super_admin, vai direto para a gestão, sem checar licença ou institutionId
+            if (role == 'super_admin') {
+              return const ManageInstitutionsPage();
+            }
+
+            // 3. ROTEAMENTO PADRÃO (Admin de empresa ou Employee)
+            final institutionId = userData['institutionId'];
+
             if (institutionId == null) {
-              return Scaffold(
+              return const Scaffold(
                 body: Center(
                   child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text(
-                      'Erro de configuração: A sua conta não está vinculada a nenhuma instituição. Por favor, contacte o suporte.',
-                      textAlign: TextAlign.center,
-                    ),
+                    padding: EdgeInsets.all(16.0),
+                    child: Text('Erro: Conta sem instituição vinculada.'),
                   ),
                 ),
               );
             }
 
-            // Se há um ID de instituição, verificamos a licença
+            // Verifica a licença da instituição
             return FutureBuilder<DocumentSnapshot>(
               future: FirebaseFirestore.instance.collection('institutions').doc(institutionId).get(),
               builder: (context, institutionDocSnapshot) {
@@ -80,20 +76,20 @@ class AuthGate extends StatelessWidget {
                 }
 
                 if (!institutionDocSnapshot.hasData || !institutionDocSnapshot.data!.exists) {
-                  // A instituição do utilizador foi eliminada. Deslogar por segurança.
                   FirebaseAuth.instance.signOut();
                   return const LoginPage();
                 }
 
                 final institutionData = institutionDocSnapshot.data!.data() as Map<String, dynamic>;
-                final licenseExpiresAt = institutionData['licenseExpiresAt'] as Timestamp;
 
-                // Verifica se a licença expirou
-                if (licenseExpiresAt.toDate().isBefore(DateTime.now())) {
+                // Tratamento seguro para timestamp (pode vir nulo em cadastros manuais errados)
+                final Timestamp? licenseTimestamp = institutionData['licenseExpiresAt'] as Timestamp?;
+
+                if (licenseTimestamp != null && licenseTimestamp.toDate().isBefore(DateTime.now())) {
                   return const ExpiredLicensePage();
                 }
 
-                // Se tudo estiver OK, finalmente, acesso à HomePage!
+                // Acesso permitido
                 return const HomePage();
               },
             );

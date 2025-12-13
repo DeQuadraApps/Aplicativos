@@ -1,3 +1,5 @@
+// lib/pages/clients/clients-list.page.dart
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -18,7 +20,7 @@ class _ClientsListPageState extends State<ClientsListPage> {
   UserModel? _currentUserData;
   Stream<QuerySnapshot<Map<String, dynamic>>>? _clientsStream;
 
-  // ✨ 1. ESTADOS PARA A PESQUISA
+  // ✨ ESTADOS PARA A PESQUISA
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -26,7 +28,6 @@ class _ClientsListPageState extends State<ClientsListPage> {
   void initState() {
     super.initState();
     _initializeUserDataAndStream();
-    // Adiciona um listener para atualizar a UI quando o texto de pesquisa mudar
     _searchController.addListener(() {
       setState(() {
         _searchQuery = _searchController.text;
@@ -34,11 +35,24 @@ class _ClientsListPageState extends State<ClientsListPage> {
     });
   }
 
-  // ✨ Não esqueça de fazer o dispose do controller
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  // +++ HELPER: Verifica Permissão de Editar Cliente +++
+  bool get _canEditClient {
+    if (_currentUserData == null) return false;
+    if (_currentUserData!.role == 'admin') return true;
+    return _currentUserData!.permissions['canEditClient'] == true;
+  }
+
+  // +++ HELPER: Verifica Permissão de Deletar Cliente +++
+  bool get _canDeleteClient {
+    if (_currentUserData == null) return false;
+    if (_currentUserData!.role == 'admin') return true;
+    return _currentUserData!.permissions['canDeleteClient'] == true;
   }
 
   Future<void> _initializeUserDataAndStream() async {
@@ -73,6 +87,12 @@ class _ClientsListPageState extends State<ClientsListPage> {
   }
 
   void _deleteClient(String clientId) {
+    // +++ VERIFICAÇÃO DE PERMISSÃO ANTES DA AÇÃO +++
+    if (!_canDeleteClient) {
+      AppSnackBar.showError(context, message: 'Você não tem permissão para excluir clientes.');
+      return;
+    }
+
     if (_institutionId == null) return;
 
     showDialog(
@@ -99,7 +119,7 @@ class _ClientsListPageState extends State<ClientsListPage> {
                 }
               }
             },
-            child: const Text('Excluir'),
+            child: const Text('Excluir', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -116,6 +136,9 @@ class _ClientsListPageState extends State<ClientsListPage> {
         appBar: AppBar(title: Text(_currentUserData?.role == 'admin' ? 'Todos os Clientes' : 'Meus Clientes')),
         floatingActionButton: FloatingActionButton(
           onPressed: () {
+            // Nota: Geralmente vendedores sempre podem CRIAR clientes,
+            // a permissão costuma restringir EDIÇÃO ou EXCLUSÃO.
+            // Se quiser restringir criação, crie uma permissão 'canCreateClient'.
             if (_institutionId != null) {
               Navigator.push(
                 context,
@@ -125,9 +148,9 @@ class _ClientsListPageState extends State<ClientsListPage> {
           },
           child: const Icon(Icons.add),
         ),
-        body: Column( // ✨ Adicionado Column para acomodar a pesquisa e a lista
+        body: Column(
           children: [
-            // ✨ 2. CAMPO DE PESQUISA
+            // CAMPO DE PESQUISA
             Padding(
               padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 0),
               child: TextField(
@@ -145,7 +168,7 @@ class _ClientsListPageState extends State<ClientsListPage> {
                 ),
               ),
             ),
-            // ✨ Envolve o StreamBuilder com Expanded
+
             Expanded(
               child: _clientsStream == null
                   ? const Center(child: CircularProgressIndicator())
@@ -153,13 +176,9 @@ class _ClientsListPageState extends State<ClientsListPage> {
                 stream: _clientsStream,
                 builder: (context, snapshot) {
                   if (snapshot.hasError) {
-                    debugPrint("===================== ERRO AO CARREGAR CLIENTES =====================");
-                    debugPrint("VERIFIQUE SE O ERRO ABAIXO CONTÉM UM LINK PARA CRIAR ÍNDICE:");
-                    debugPrint("${snapshot.error}");
-                    debugPrint("=====================================================================");
                     return Center(child: Padding(
                       padding: const EdgeInsets.all(16.0),
-                      child: Text("Erro ao carregar clientes.\n\nVerifique o console de depuração para mais detalhes.", textAlign: TextAlign.center),
+                      child: Text("Erro ao carregar clientes.\n${snapshot.error}", textAlign: TextAlign.center),
                     ));
                   }
                   if (snapshot.connectionState == ConnectionState.waiting) {
@@ -171,16 +190,12 @@ class _ClientsListPageState extends State<ClientsListPage> {
 
                   final allClients = snapshot.data!.docs.map((doc) => Client.fromFirestore(doc)).toList();
 
-                  // ✨ 3. APLICANDO O FILTRO
+                  // APLICANDO O FILTRO
                   final filteredClients = allClients.where((client) {
-                    if (_searchQuery.isEmpty) {
-                      return true;
-                    }
+                    if (_searchQuery.isEmpty) return true;
                     final queryLower = _searchQuery.toLowerCase();
                     final nameLower = client.companyName.toLowerCase();
-                    // Como o campo cnpj já armazena CPF também, uma única verificação é suficiente
                     final cnpjLower = client.cnpj.toLowerCase();
-
                     return nameLower.contains(queryLower) || cnpjLower.contains(queryLower);
                   }).toList();
 
@@ -190,9 +205,9 @@ class _ClientsListPageState extends State<ClientsListPage> {
 
                   return ListView.builder(
                     padding: const EdgeInsets.all(8),
-                    itemCount: filteredClients.length, // Usa a lista filtrada
+                    itemCount: filteredClients.length,
                     itemBuilder: (context, index) {
-                      final client = filteredClients[index]; // Usa a lista filtrada
+                      final client = filteredClients[index];
                       return Card(
                         child: ListTile(
                           title: Text(client.companyName),
@@ -211,15 +226,35 @@ class _ClientsListPageState extends State<ClientsListPage> {
                                 _deleteClient(client.id!);
                               }
                             },
-                            itemBuilder: (context) => [
-                              const PopupMenuItem(
-                                value: 'edit',
-                                child: ListTile(leading: Icon(Icons.edit_note), title: Text('Editar')),
-                              ),
-                              const PopupMenuItem(
-                                  value: 'delete',
-                                  child: ListTile(leading: Icon(Icons.delete_forever, color: Colors.red), title: Text('Excluir'))),
-                            ],
+                            itemBuilder: (context) {
+                              // +++ FILTRO DE OPÇÕES BASEADO EM PERMISSÃO +++
+                              final List<PopupMenuEntry<String>> menuItems = [];
+
+                              if (_canEditClient) {
+                                menuItems.add(
+                                  const PopupMenuItem(
+                                    value: 'edit',
+                                    child: ListTile(leading: Icon(Icons.edit_note), title: Text('Editar')),
+                                  ),
+                                );
+                              }
+
+                              if (_canDeleteClient) {
+                                menuItems.add(
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: ListTile(leading: Icon(Icons.delete_forever, color: Colors.red), title: Text('Excluir', style: TextStyle(color: Colors.red))),
+                                  ),
+                                );
+                              }
+
+                              // Se não tiver permissão para nada, mostra uma mensagem (opcional)
+                              if (menuItems.isEmpty) {
+                                menuItems.add(const PopupMenuItem(enabled: false, child: Text("Sem ações disponíveis")));
+                              }
+
+                              return menuItems;
+                            },
                           ),
                         ),
                       );
