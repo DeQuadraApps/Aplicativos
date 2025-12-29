@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:quadra_vendas/models/client.model.dart';
 import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/pages/clients/add-edit-client.page.dart';
+import 'package:quadra_vendas/pages/clients/clients_detail.page.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
 
 class ClientsListPage extends StatefulWidget {
@@ -20,7 +21,7 @@ class _ClientsListPageState extends State<ClientsListPage> {
   UserModel? _currentUserData;
   Stream<QuerySnapshot<Map<String, dynamic>>>? _clientsStream;
 
-  // ✨ ESTADOS PARA A PESQUISA
+  // ESTADOS PARA A PESQUISA
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -41,14 +42,14 @@ class _ClientsListPageState extends State<ClientsListPage> {
     super.dispose();
   }
 
-  // +++ HELPER: Verifica Permissão de Editar Cliente +++
+  // HELPER: Verifica Permissão de Editar Cliente
   bool get _canEditClient {
     if (_currentUserData == null) return false;
     if (_currentUserData!.role == 'admin') return true;
     return _currentUserData!.permissions['canEditClient'] == true;
   }
 
-  // +++ HELPER: Verifica Permissão de Deletar Cliente +++
+  // HELPER: Verifica Permissão de Deletar Cliente
   bool get _canDeleteClient {
     if (_currentUserData == null) return false;
     if (_currentUserData!.role == 'admin') return true;
@@ -87,7 +88,6 @@ class _ClientsListPageState extends State<ClientsListPage> {
   }
 
   void _deleteClient(String clientId) {
-    // +++ VERIFICAÇÃO DE PERMISSÃO ANTES DA AÇÃO +++
     if (!_canDeleteClient) {
       AppSnackBar.showError(context, message: 'Você não tem permissão para excluir clientes.');
       return;
@@ -136,9 +136,6 @@ class _ClientsListPageState extends State<ClientsListPage> {
         appBar: AppBar(title: Text(_currentUserData?.role == 'admin' ? 'Todos os Clientes' : 'Meus Clientes')),
         floatingActionButton: FloatingActionButton(
           onPressed: () {
-            // Nota: Geralmente vendedores sempre podem CRIAR clientes,
-            // a permissão costuma restringir EDIÇÃO ou EXCLUSÃO.
-            // Se quiser restringir criação, crie uma permissão 'canCreateClient'.
             if (_institutionId != null) {
               Navigator.push(
                 context,
@@ -212,6 +209,20 @@ class _ClientsListPageState extends State<ClientsListPage> {
                         child: ListTile(
                           title: Text(client.companyName),
                           subtitle: Text(client.cnpj),
+                          // ✨ AÇÃO AO CLICAR NO CLIENTE -> VAI PARA DETALHES/HISTÓRICO
+                          onTap: () {
+                            if (_institutionId != null) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ClientDetailPage(
+                                    client: client,
+                                    institutionId: _institutionId!,
+                                  ),
+                                ),
+                              );
+                            }
+                          },
                           trailing: PopupMenuButton(
                             onSelected: (value) {
                               if (value == 'edit') {
@@ -227,7 +238,7 @@ class _ClientsListPageState extends State<ClientsListPage> {
                               }
                             },
                             itemBuilder: (context) {
-                              // +++ FILTRO DE OPÇÕES BASEADO EM PERMISSÃO +++
+                              // FILTRO DE OPÇÕES BASEADO EM PERMISSÃO
                               final List<PopupMenuEntry<String>> menuItems = [];
 
                               if (_canEditClient) {
@@ -248,7 +259,6 @@ class _ClientsListPageState extends State<ClientsListPage> {
                                 );
                               }
 
-                              // Se não tiver permissão para nada, mostra uma mensagem (opcional)
                               if (menuItems.isEmpty) {
                                 menuItems.add(const PopupMenuItem(enabled: false, child: Text("Sem ações disponíveis")));
                               }

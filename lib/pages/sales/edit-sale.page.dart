@@ -193,6 +193,22 @@ class _EditSalePageState extends State<EditSalePage> {
           .collection('sales').doc(updatedSale.id!)
           .update(updatedSale.toFirestore());
 
+      final financialQuery = await FirebaseFirestore.instance
+          .collection('institutions')
+          .doc(_institutionId)
+          .collection('financial_transactions')
+          .where('relatedSaleId', isEqualTo: widget.sale.id)
+          .limit(1)
+          .get();
+
+      if (financialQuery.docs.isNotEmpty) {
+        final transactionDoc = financialQuery.docs.first;
+        await transactionDoc.reference.update({
+          'amount': updatedSale.totalAmount,
+          'description': 'Venda Editada - ${updatedSale.clientName}',
+        });
+      }
+
       if(mounted){
         AppSnackBar.showSuccess(context, message: 'Venda atualizada com sucesso!');
         Navigator.pop(context);

@@ -60,7 +60,7 @@ class _ReportOptionsPageState extends State<ReportOptionsPage> {
   void _generateReport() {
     if (_selectedSalespersonId == null || _selectedMonth == null || _selectedYear == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor, selecione todas as opções.'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('Por favor, selecione todas as opções.'), backgroundColor: Colors.lightBlueAccent),
       );
       return;
     }

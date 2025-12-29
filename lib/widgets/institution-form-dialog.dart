@@ -1,10 +1,10 @@
-// lib/widgets/institution-form.dialog.dart
+// lib/widgets/institution-form-dialog.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart'; // Seu widget
+import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
 
 class InstitutionFormDialog extends StatefulWidget {
   final String? instId;
@@ -19,12 +19,16 @@ class InstitutionFormDialog extends StatefulWidget {
 class _InstitutionFormDialogState extends State<InstitutionFormDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _emailController = TextEditingController(); // Apenas para criar novo
-  final _passController = TextEditingController();  // Apenas para criar novo
+  final _emailController = TextEditingController();
+  final _passController = TextEditingController();
 
   DateTime _licenseDate = DateTime.now().add(const Duration(days: 365));
   bool _isActive = true;
   bool _isLoading = false;
+
+  // --- NOVO: Controle do Plano ---
+  String _selectedPlan = 'START';
+  final List<String> _planOptions = ['START', 'CONTROL', 'PERFORMANCE', 'ELITE'];
 
   @override
   void initState() {
@@ -32,6 +36,16 @@ class _InstitutionFormDialogState extends State<InstitutionFormDialog> {
     if (widget.data != null) {
       _nameController.text = widget.data!['name'];
       _isActive = widget.data!['status'] == 'active';
+
+      // Carrega o plano existente ou define START como fallback
+      if (widget.data!['plan'] != null) {
+        _selectedPlan = widget.data!['plan'].toString().toUpperCase();
+        // Segurança: se o plano salvo não existir na lista (ex: plano antigo), adiciona na lista visualmente
+        if (!_planOptions.contains(_selectedPlan)) {
+          _planOptions.add(_selectedPlan);
+        }
+      }
+
       if (widget.data!['licenseExpiresAt'] != null) {
         _licenseDate = (widget.data!['licenseExpiresAt'] as Timestamp).toDate();
       }
@@ -43,9 +57,15 @@ class _InstitutionFormDialogState extends State<InstitutionFormDialog> {
     setState(() => _isLoading = true);
 
     try {
+      // Dados básicos de contadores para inicializar
+      final initialFeatures = {
+        'nfs_emitted': 0,
+        'whatsapp_sent': 0,
+        'users_extra': 0,
+      };
+
       if (widget.instId == null) {
         // === CRIAÇÃO DE NOVA INSTITUIÇÃO ===
-        // 1. Criar usuário secundário sem deslogar o atual
         FirebaseApp secondaryApp = await Firebase.initializeApp(
           name: 'SecondaryApp',
           options: Firebase.app().options,
@@ -59,41 +79,62 @@ class _InstitutionFormDialogState extends State<InstitutionFormDialog> {
 
         String newOwnerId = userCred.user!.uid;
 
-        // 2. Criar Documento da Instituição
+        // Cria doc com tudo inicializado
         DocumentReference instRef = await FirebaseFirestore.instance.collection('institutions').add({
           'name': _nameController.text.trim(),
           'ownerId': newOwnerId,
           'status': _isActive ? 'active' : 'inactive',
           'licenseExpiresAt': Timestamp.fromDate(_licenseDate),
           'createdAt': FieldValue.serverTimestamp(),
+
+          'plan': _selectedPlan,
+          'plan_status': 'active',
+          'features_usage': initialFeatures, // <--- Aqui cria na nova
+          'billing_cycle_start': FieldValue.serverTimestamp(),
         });
 
-        // 3. Criar Documento do User (Admin da Instituição)
         await FirebaseFirestore.instance.collection('users').doc(newOwnerId).set({
           'uid': newOwnerId,
           'email': _emailController.text.trim(),
           'fullName': 'Admin ${_nameController.text}',
-          'role': 'admin', // Role de admin da empresa
+          'role': 'admin',
           'institutionId': instRef.id,
           'status': 'active',
           'createdAt': FieldValue.serverTimestamp(),
         });
 
-        // Limpeza do app secundário
         await secondaryApp.delete();
 
       } else {
-        // === EDIÇÃO ===
-        await FirebaseFirestore.instance.collection('institutions').doc(widget.instId).update({
+        // === EDIÇÃO (CORREÇÃO AQUI) ===
+
+        // Prepara os dados para atualizar
+        Map<String, dynamic> updateData = {
           'name': _nameController.text.trim(),
           'status': _isActive ? 'active' : 'inactive',
           'licenseExpiresAt': Timestamp.fromDate(_licenseDate),
-        });
+          'plan': _selectedPlan,
+        };
+
+        // Verifica se no dado original (antes de abrir o modal) já tinha os contadores
+        // Se não tiver (null), a gente cria agora.
+        bool hasFeatures = widget.data != null && widget.data!['features_usage'] != null;
+
+        if (!hasFeatures) {
+          updateData['features_usage'] = initialFeatures; // Cria se não existir
+          updateData['plan_status'] = 'active'; // Garante status ativo
+          updateData['billing_cycle_start'] = FieldValue.serverTimestamp();
+        }
+
+        await FirebaseFirestore.instance
+            .collection('institutions')
+            .doc(widget.instId)
+            .update(updateData);
       }
 
       if(mounted) {
         Navigator.pop(context);
-        AppSnackBar.showSuccess(context, message: 'Salvo com sucesso!'); // Adapte para success se tiver
+        AppSnackBar.showSuccess(context, message: 'Salvo com sucesso!');
       }
 
     } catch (e) {
@@ -120,14 +161,42 @@ class _InstitutionFormDialogState extends State<InstitutionFormDialog> {
                 decoration: const InputDecoration(labelText: 'Nome da Empresa'),
                 validator: (v) => v!.isEmpty ? 'Campo obrigatório' : null,
               ),
-              SizedBox(height: 10,),
+              const SizedBox(height: 15),
+
+              // --- SELETOR DE PLANO ---
+              DropdownButtonFormField<String>(
+                value: _selectedPlan,
+                decoration: const InputDecoration(
+                  labelText: 'Plano de Assinatura',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                ),
+                items: _planOptions.map((plan) {
+                  return DropdownMenuItem(
+                    value: plan,
+                    child: Text(
+                        plan,
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: plan == 'ELITE' ? Colors.amber[800] :
+                            plan == 'PERFORMANCE' ? Colors.blue[800] : Colors.black87
+                        )
+                    ),
+                  );
+                }).toList(),
+                onChanged: (val) {
+                  if (val != null) setState(() => _selectedPlan = val);
+                },
+              ),
+              const SizedBox(height: 15),
+
               if (!isEditing) ...[
                 TextFormField(
                   controller: _emailController,
                   decoration: const InputDecoration(labelText: 'E-mail do Admin'),
                   validator: (v) => !v!.contains('@') ? 'E-mail inválido' : null,
                 ),
-                SizedBox(height: 10,),
+                const SizedBox(height: 10),
                 TextFormField(
                   controller: _passController,
                   decoration: const InputDecoration(labelText: 'Senha Inicial'),

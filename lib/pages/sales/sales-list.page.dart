@@ -7,11 +7,13 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
+import 'package:quadra_vendas/enums/plan-type.dart';
 import 'package:quadra_vendas/models/client.model.dart';
 import 'package:quadra_vendas/models/sale.model.dart';
 import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/pages/sales/edit-sale.page.dart';
 import 'package:quadra_vendas/services/pdf-sale.service.dart';
+import 'package:quadra_vendas/services/whatsapp.service.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -25,10 +27,11 @@ class SalesListPage extends StatefulWidget {
 class _SalesListPageState extends State<SalesListPage> {
   String? _institutionId;
   String _institutionName = '';
+  PlanType _activePlan = PlanType.start;
   UserModel? _currentUserData;
   Stream<QuerySnapshot<Map<String, dynamic>>>? _salesStream;
 
-  // ✨ ESTADOS PARA A PESQUISA
+  // ESTADOS PARA A PESQUISA
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -49,14 +52,14 @@ class _SalesListPageState extends State<SalesListPage> {
     super.dispose();
   }
 
-  // +++ HELPER: Verifica Permissão de Deletar +++
+  // HELPER: Verifica Permissão de Deletar
   bool get _canDeleteSale {
     if (_currentUserData == null) return false;
     if (_currentUserData!.role == 'admin') return true;
     return _currentUserData!.permissions['canDeleteSale'] == true;
   }
 
-  // +++ HELPER: Verifica Permissão de Marcar Entregue +++
+  // HELPER: Verifica Permissão de Marcar Entregue
   bool get _canMarkDelivered {
     if (_currentUserData == null) return false;
     if (_currentUserData!.role == 'admin') return true;
@@ -75,7 +78,11 @@ class _SalesListPageState extends State<SalesListPage> {
       _institutionId = _currentUserData!.institutionId;
 
       final instDoc = await FirebaseFirestore.instance.collection('institutions').doc(_institutionId).get();
-      _institutionName = instDoc.data()?['name'] ?? '';
+      final data = instDoc.data();
+
+      _institutionName = data?['name'] ?? '';
+
+      _activePlan = PlanType.fromString(data?['plan']);
 
       Query<Map<String, dynamic>> query = FirebaseFirestore.instance
           .collection('institutions').doc(_institutionId)
@@ -98,8 +105,19 @@ class _SalesListPageState extends State<SalesListPage> {
     }
   }
 
+  // ✨ DIALOG DE UPGRADE
+  void _showUpgradeDialog() {
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text("Funcionalidade Premium"),
+        content: const Text("O envio rápido via WhatsApp é exclusivo dos planos Control e Elite.\n\nFaça um upgrade para agilizar seu atendimento!"),
+        actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text("Entendi"))],
+      ),
+    );
+  }
+
   Future<void> _toggleDeliveryStatus(Sale sale) async {
-    // +++ VERIFICAÇÃO DE PERMISSÃO ANTES DA AÇÃO +++
     if (!_canMarkDelivered) {
       AppSnackBar.showError(context, message: 'Você não tem permissão para alterar o status de entrega.');
       return;
@@ -126,7 +144,6 @@ class _SalesListPageState extends State<SalesListPage> {
   }
 
   void _deleteSale(String saleId) {
-    // +++ VERIFICAÇÃO DE PERMISSÃO ANTES DA AÇÃO +++
     if (!_canDeleteSale) {
       AppSnackBar.showError(context, message: 'Você não tem permissão para excluir vendas.');
       return;
@@ -168,6 +185,7 @@ class _SalesListPageState extends State<SalesListPage> {
   }
 
   Future<void> _showPdfPreview(Sale sale) async {
+    // PDF LIBERADO
     final client = await _fetchFullClient(sale.clientId);
     if (client == null) {
       if (mounted) AppSnackBar.showError(context, message: 'Cliente desta venda não encontrado.');
@@ -175,12 +193,13 @@ class _SalesListPageState extends State<SalesListPage> {
     }
     final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod, salespersonName: sale.salespersonName, isDelivered: sale.isDelivered);
 
-    final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName);
+    final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName, activePlan: _activePlan);
     final pdfBytes = await pdfService.generatePdf();
     await Printing.layoutPdf(onLayout: (format) async => pdfBytes);
   }
 
   Future<void> _shareSale(Sale sale) async {
+    // PDF LIBERADO
     AppSnackBar.showInfo(context, message: "A preparar documento para partilha...");
     final client = await _fetchFullClient(sale.clientId);
     if (client == null) {
@@ -190,7 +209,7 @@ class _SalesListPageState extends State<SalesListPage> {
     try {
       final fullSaleData = Sale(client: client, id: sale.id, clientName: sale.clientName, clientId: sale.clientId, items: sale.items, totalAmount: sale.totalAmount, withInvoice: sale.withInvoice, newClient: sale.newClient, observations: sale.observations, saleDate: sale.saleDate, userId: sale.userId, paymentMethod: sale.paymentMethod, salespersonName: sale.salespersonName, isDelivered: sale.isDelivered);
 
-      final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName);
+      final pdfService = PdfSaleService(sale: fullSaleData, institutionName: _institutionName, activePlan: _activePlan);
       final pdfBytes = await pdfService.generatePdf();
       final tempDir = await getTemporaryDirectory();
       final file = await File('${tempDir.path}/venda_${sale.id}.pdf').create();
@@ -202,11 +221,11 @@ class _SalesListPageState extends State<SalesListPage> {
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
     final currencyFormatter = NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$');
     final dateFormatter = DateFormat('dd/MM/yyyy');
+    final isStartPlan = _activePlan == PlanType.start; // ✨ Verifica plano
 
     return Scaffold(
       appBar: AppBar(title: Text(_currentUserData?.role == 'admin' ? 'Histórico de Vendas' : 'Minhas Vendas')),
@@ -290,6 +309,29 @@ class _SalesListPageState extends State<SalesListPage> {
                               currencyFormatter.format(sale.totalAmount),
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                             ),
+
+                            const SizedBox(width: 4),
+                            // ✨ BOTÃO WHATSAPP (VALIDADO)
+                            IconButton(
+                              // Se for start, mostra cadeado cinza. Se não, share verde.
+                              icon: Icon(
+                                  isStartPlan ? Icons.lock_outline : Icons.share,
+                                  color: isStartPlan ? Colors.grey : Colors.green
+                              ),
+                              tooltip: isStartPlan ? 'Recurso Premium' : 'Enviar Resumo (WhatsApp)',
+                              onPressed: () {
+                                if (isStartPlan) {
+                                  _showUpgradeDialog();
+                                } else {
+                                  WhatsAppService.sendSaleText(
+                                      context: context,
+                                      sale: sale,
+                                      institutionName: _institutionName
+                                  );
+                                }
+                              },
+                            ),
+
                             PopupMenuButton<String>(
                               icon: const Icon(Icons.more_vert),
                               onSelected: (value) {
@@ -312,10 +354,8 @@ class _SalesListPageState extends State<SalesListPage> {
                                 }
                               },
                               itemBuilder: (context) {
-                                // +++ FILTRA OS ITENS DO MENU BASEADO NA PERMISSÃO +++
                                 final List<PopupMenuEntry<String>> menuItems = [];
 
-                                // 1. Marcar Entregue
                                 if (_canMarkDelivered) {
                                   menuItems.add(
                                     PopupMenuItem(
@@ -333,14 +373,13 @@ class _SalesListPageState extends State<SalesListPage> {
                                   menuItems.add(const PopupMenuDivider());
                                 }
 
-                                // 2. Itens Comuns
                                 menuItems.addAll([
                                   const PopupMenuItem(value: 'edit', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
+                                  // PDF LIBERADO NO MENU
                                   const PopupMenuItem(value: 'pdf', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.picture_as_pdf_outlined), title: Text('Ver PDF'))),
-                                  const PopupMenuItem(value: 'share', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.share_outlined), title: Text('Partilhar'))),
+                                  const PopupMenuItem(value: 'share', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.share_outlined), title: Text('Partilhar PDF'))),
                                 ]);
 
-                                // 3. Excluir
                                 if (_canDeleteSale) {
                                   menuItems.add(
                                     const PopupMenuItem(value: 'delete', child: ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.delete_forever_outlined, color: Colors.red), title: Text('Excluir', style: TextStyle(color: Colors.red)))),

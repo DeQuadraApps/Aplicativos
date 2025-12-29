@@ -1,4 +1,4 @@
-// lib/pages/sales/new_sale_page.dart
+// lib/pages/sales/new-sale.page.dart
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -8,17 +8,27 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
+import 'package:quadra_vendas/enums/plan-type.dart';
 import 'package:quadra_vendas/models/client.model.dart';
 import 'package:quadra_vendas/models/product.model.dart';
 import 'package:quadra_vendas/models/sale.model.dart';
 import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/pages/clients/add-edit-client.page.dart';
 import 'package:quadra_vendas/services/pdf-sale.service.dart';
+import 'package:quadra_vendas/services/whatsapp.service.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
 import 'package:share_plus/share_plus.dart';
 
 class NewSalePage extends StatefulWidget {
-  const NewSalePage({super.key});
+  // ✨ NOVOS PARÂMETROS PARA O HISTÓRICO
+  final Client? preSelectedClient;
+  final List<SaleItem>? preSelectedItems;
+
+  const NewSalePage({
+    super.key,
+    this.preSelectedClient,
+    this.preSelectedItems,
+  });
 
   @override
   State<NewSalePage> createState() => _NewSalePageState();
@@ -28,11 +38,16 @@ class _NewSalePageState extends State<NewSalePage> {
   int _currentStep = 0;
   String? _institutionId;
   String _institutionName = '';
+  PlanType _activePlan = PlanType.start;
+
   Client? _selectedClient;
   final _clientSearchController = TextEditingController();
   List<Product> _allProducts = [];
   List<Product> _filteredProducts = [];
+
+  // AQUI É UMA LISTA, DIFERENTE DA DIRECT SALES
   final List<SaleItem> _cart = [];
+
   final _productSearchController = TextEditingController();
   bool _withInvoice = false;
   bool _newClient = false;
@@ -41,8 +56,8 @@ class _NewSalePageState extends State<NewSalePage> {
   final _paymentMethodController = TextEditingController();
   final _finalizeFormKey = GlobalKey<FormState>();
 
-  // ✨ ESTADOS DO USUÁRIO
-  UserModel? _currentUserData; // Armazena o objeto completo para verificar permissões
+  // ESTADOS DO USUÁRIO
+  UserModel? _currentUserData;
   String _currentUserRole = '';
   String _currentUserName = '';
   List<UserModel> _salespeopleList = [];
@@ -63,18 +78,17 @@ class _NewSalePageState extends State<NewSalePage> {
     super.dispose();
   }
 
-  // +++ HELPER: Verifica Permissão de Alterar Preço +++
+  // HELPER: Verifica Permissão de Alterar Preço
   bool get _canChangePrice {
     if (_currentUserData == null) return false;
     if (_currentUserData!.role == 'admin') return true;
-    // Verifica se a permissão 'canChangePrice' é true no Map de permissões
     return _currentUserData!.permissions['canChangePrice'] == true;
   }
 
   Future<void> _loadInitialData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      if(mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       return;
     }
     try {
@@ -82,13 +96,16 @@ class _NewSalePageState extends State<NewSalePage> {
       final userData = UserModel.fromFirestore(userDoc);
       final institutionId = userData.institutionId;
 
-      if(institutionId == null) {
-        if(mounted) setState(() => _isLoading = false);
+      if (institutionId == null) {
+        if (mounted) setState(() => _isLoading = false);
         return;
       }
 
       final instDoc = await FirebaseFirestore.instance.collection('institutions').doc(institutionId).get();
-      final adminId = instDoc.data()?['ownerId'];
+      final data = instDoc.data();
+      final adminId = data?['ownerId'];
+
+      final plan = (data?['plan'] ?? 'start').toString().toLowerCase();
 
       if (userData.role == 'admin') {
         final salespeopleSnapshot = await FirebaseFirestore.instance
@@ -119,22 +136,47 @@ class _NewSalePageState extends State<NewSalePage> {
       if (mounted) {
         setState(() {
           _institutionId = institutionId;
-          _institutionName = instDoc.data()?['name'] ?? '';
+          _institutionName = data?['name'] ?? '';
+          _activePlan = PlanType.fromString(plan);
           _allProducts = combinedProducts;
           _filteredProducts = _allProducts;
-          _currentUserData = userData; // ✨ Armazena o user completo
+          _currentUserData = userData;
           _currentUserRole = userData.role;
           _currentUserName = userData.fullName;
           _isLoading = false;
         });
       }
-    } catch(e) {
+
+      // ✨ LÓGICA DO HISTÓRICO (Repetir Pedido)
+      if (widget.preSelectedClient != null) {
+        _selectedClient = widget.preSelectedClient;
+        _paymentMethodController.text = widget.preSelectedClient!.paymentMethod;
+      }
+
+      if (widget.preSelectedItems != null) {
+        // Como _cart é uma Lista, nós apenas adicionamos tudo
+        _cart.addAll(widget.preSelectedItems!);
+      }
+
+    } catch (e) {
       if (mounted) {
         debugPrint("Erro ao carregar dados iniciais: $e");
         AppSnackBar.showError(context, message: 'Erro ao carregar dados iniciais.');
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  // ✨ DIALOG DE UPGRADE
+  void _showUpgradeDialog() {
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text("Funcionalidade Premium"),
+        content: const Text("O envio rápido via WhatsApp é exclusivo dos planos Control e Elite.\n\nFaça um upgrade para agilizar seu atendimento!"),
+        actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text("Entendi"))],
+      ),
+    );
   }
 
   void _onClientSelected(Client client) {
@@ -154,11 +196,19 @@ class _NewSalePageState extends State<NewSalePage> {
 
   void _addToCart(Product product) {
     setState(() {
-      final existingItem = _cart.firstWhere((item) => item.product.id == product.id, orElse: () => SaleItem(product: product, quantity: 0));
+      // Verifica se já existe na lista
+      final existingItem = _cart.firstWhere(
+              (item) => item.product.id == product.id,
+          orElse: () => SaleItem(product: product, quantity: 0)
+      );
+
+      // Se a quantidade for 0, significa que veio do orElse (não estava na lista)
       if (existingItem.quantity == 0) {
+        existingItem.quantity = 1; // Começa com 1
         _cart.add(existingItem);
+      } else {
+        existingItem.quantity++; // Incrementa
       }
-      existingItem.quantity++;
     });
   }
 
@@ -184,31 +234,65 @@ class _NewSalePageState extends State<NewSalePage> {
     }
   }
 
+  // ✨ DIÁLOGO ATUALIZADO (Validado WhatsApp)
   Future<void> _showPostSaleDialog(Uint8List pdfBytes, Sale sale) async {
+    final bool isStartPlan = _activePlan == PlanType.start;
+
     await showDialog(
         context: context,
+        barrierDismissible: false,
         builder: (context) => AlertDialog(
-          title: const Text('Venda Salva com Sucesso!'),
-          content: const Text('O que deseja fazer agora?'),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Column(
+            children: [
+              Icon(Icons.check_circle, color: Colors.green, size: 50),
+              SizedBox(height: 10),
+              Text('Venda Salva!'),
+            ],
+          ),
+          content: const Text('O que deseja fazer agora?', textAlign: TextAlign.center),
+          actionsAlignment: MainAxisAlignment.center,
+          actionsOverflowButtonSpacing: 8,
           actions: [
-            TextButton(
-              child: const Text('Fechar'),
-              onPressed: () => Navigator.of(context).pop(),
+            // BOTÃO WHATSAPP (Validado)
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isStartPlan ? Colors.grey : Colors.green,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 45),
+              ),
+              icon: Icon(isStartPlan ? Icons.lock_outline : Icons.share, size: 18),
+              label: Text(isStartPlan ? 'WhatsApp (Premium)' : 'Enviar WhatsApp (Texto)'),
+              onPressed: () {
+                if (isStartPlan) {
+                  _showUpgradeDialog();
+                } else {
+                  Navigator.of(context).pop();
+                  WhatsAppService.sendSaleText(
+                    context: context,
+                    sale: sale,
+                    institutionName: _institutionName,
+                  );
+                }
+              },
             ),
-            TextButton(
-              child: const Text('Ver PDF'),
+
+            // BOTÃO VER PDF (Liberado)
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 45)),
+              icon: const Icon(Icons.picture_as_pdf),
+              label: const Text('Ver PDF Formal'),
               onPressed: () {
                 Navigator.of(context).pop();
                 Printing.layoutPdf(onLayout: (format) async => pdfBytes);
               },
             ),
-            ElevatedButton(
-              child: const Text('Partilhar'),
-              onPressed: () {
-                Navigator.of(context).pop();
-                _sharePdf(pdfBytes, sale);
-              },
-            )
+
+            // BOTÃO FECHAR
+            TextButton(
+              child: const Text('Fechar', style: TextStyle(color: Colors.grey)),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
           ],
         ));
   }
@@ -276,7 +360,26 @@ class _NewSalePageState extends State<NewSalePage> {
         salespersonName: sale.salespersonName,
       );
 
-      final pdfService = PdfSaleService(sale: saleWithId, institutionName: _institutionName);
+      await FirebaseFirestore.instance
+          .collection('institutions')
+          .doc(_institutionId)
+          .collection('financial_transactions')
+          .add({
+        'institutionId': _institutionId,
+        'description': 'Venda - ${_selectedClient!.companyName}',
+        'amount': sale.totalAmount,
+        'type': 'income',
+        'status': 'paid',
+        'dueDate': Timestamp.fromDate(DateTime.now()),
+        'paidAt': Timestamp.fromDate(DateTime.now()),
+        'category': 'Vendas',
+        'paymentMethod': _paymentMethodController.text,
+        'relatedSaleId': saleDocRef.id,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      // GERAÇÃO DE PDF (Sempre liberado)
+      final pdfService = PdfSaleService(sale: saleWithId, institutionName: _institutionName, activePlan: _activePlan);
       final pdfBytes = await pdfService.generatePdf();
 
       if (mounted) {
@@ -285,14 +388,12 @@ class _NewSalePageState extends State<NewSalePage> {
       }
     } catch (e) {
       if (mounted) AppSnackBar.showError(context, message: 'Erro ao finalizar a venda: ${e.toString()}');
-      print(e.toString());
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _showEditPriceDialog(SaleItem item) async {
-    // +++ APLICAÇÃO DA PERMISSÃO NO DIALOG +++
     if (!_canChangePrice) {
       AppSnackBar.showError(context, message: 'Você não tem permissão para alterar preços.');
       return;
@@ -582,9 +683,7 @@ class _NewSalePageState extends State<NewSalePage> {
                 return ListTile(
                   title: Text(item.product.name),
                   subtitle: InkWell(
-                    // ✨ Só abre o dialog se tiver permissão (senão, mostra erro dentro do dialog func ou nem faz nada)
-                    // No código acima, eu deixei o onTap ativo, mas a validação ocorre DENTRO do _showEditPriceDialog
-                    // para dar feedback ao usuário de "Acesso Negado".
+                    // Só abre o dialog se tiver permissão
                     onTap: () => _showEditPriceDialog(item),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4.0),
@@ -595,7 +694,6 @@ class _NewSalePageState extends State<NewSalePage> {
                             '${currencyFormatter.format(item.unitPrice)} ',
                             style: TextStyle(color: Theme.of(context).colorScheme.primary),
                           ),
-                          // ✨ Ícone visual indicando se pode editar
                           if (_canChangePrice)
                             const Icon(Icons.edit, size: 14, color: Colors.grey)
                           else

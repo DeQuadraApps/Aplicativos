@@ -6,73 +6,207 @@ class TermsOfUsePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
+      backgroundColor: colorScheme.surface,
       appBar: AppBar(
-        title: const Text('Termos e Condições de Uso'),
+        title: const Text('Termos de Uso'),
+        centerTitle: true,
+        backgroundColor: colorScheme.surface,
+        scrolledUnderElevation: 0,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Termos de Uso - Quadra Vendas', style: textTheme.headlineSmall),
-            const SizedBox(height: 8),
-            const Text("Última atualização: 06 de Agosto de 2025"), // É uma boa prática adicionar a data da última atualização
-            const SizedBox(height: 16),
-            const Text(
-              'Estes Termos e Condições de Uso ("Termos") regem o seu acesso e uso da aplicação Quadra Vendas ("Software"), desenvolvido por Dequadra Apps. Ao criar uma conta e utilizar o nosso Software, você concorda em cumprir integralmente com estes Termos.',
+            // --- CABEÇALHO ---
+            Center(
+              child: Column(
+                children: [
+                  Icon(Icons.gavel_rounded, size: 48, color: colorScheme.primary),
+                  const SizedBox(height: 16),
+                  Text(
+                    "CONTRATO DE LICENÇA DE USUÁRIO FINAL",
+                    style: textTheme.labelLarge?.copyWith(
+                        color: colorScheme.outline,
+                        letterSpacing: 1.5,
+                        fontWeight: FontWeight.bold
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Última atualização: Dezembro de 2025",
+                    style: textTheme.bodySmall?.copyWith(color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 40),
+
+            // --- CONTEÚDO LEGAL ---
+            _TermSection(
+              number: '1',
+              title: 'ACEITE DOS TERMOS',
+              content: 'Ao criar uma conta ou utilizar o aplicativo "Quadra Vendas", você concorda integralmente com estes termos. Se você estiver utilizando o aplicativo em nome de uma empresa (Pessoa Jurídica), você declara ter poderes para vincular a empresa a estes termos.',
             ),
 
-            const SizedBox(height: 24),
-            Text('1. Definição de Papéis', style: textTheme.titleLarge),
-            const Divider(),
-            const Text(
-              '1.1. Administrador: O utilizador inicial que cria a conta da Instituição é designado como "Administrador". Este utilizador tem controle total sobre a gestão da conta, incluindo a capacidade de criar, visualizar e desativar contas de Vendedor, bem como aceder a todos os dados da instituição (clientes, produtos, vendas, metas e relatórios).\n\n'
-                  '1.2. Vendedor: Uma conta de utilizador criada por um Administrador é designada como "Vendedor" (ou "employee"). Os Vendedores têm acesso limitado ao Software, restrito à gestão dos seus próprios clientes e vendas, e ao catálogo de produtos da instituição, conforme definido por estes Termos.',
+            _TermSection(
+              number: '2',
+              title: 'LICENÇA DE USO E ACESSO',
+              content: 'A Dequadra Soluções Digitais concede uma licença revogável, não exclusiva e intransferível para uso do software.\n\n'
+                  '2.1. Administrador: O usuário pagante (Titular) detém o controle total da conta e dos dados.\n'
+                  '2.2. Usuários Vinculados: Vendedores cadastrados pelo Administrador têm acesso limitado e revogável a qualquer momento pelo Titular.',
             ),
 
-            const SizedBox(height: 24),
-            Text('2. Licença e Gestão de Contas', style: textTheme.titleLarge),
-            const Divider(),
-            const Text(
-              '2.1. Concedemos à Instituição uma licença limitada, não exclusiva e intransferível para usar o Software para fins comerciais internos, de acordo com o plano contratado.\n\n'
-                  '2.2. O Administrador é o único responsável pela criação e gestão das contas dos Vendedores vinculados à sua Instituição. É estritamente proibido compartilhar, sublicenciar, vender ou alugar o acesso ao Software. Cada conta é individual e intransferível.',
+            _TermSection(
+              number: '3',
+              title: 'PLANOS E PAGAMENTOS',
+              content: 'O serviço é prestado no modelo de assinatura pré-paga.\n\n'
+                  '3.1. O não pagamento ou a expiração da licença resultará no bloqueio imediato do acesso às funcionalidades administrativas e financeiras.\n'
+                  '3.2. Os dados serão preservados por um período de carência de 90 dias após o bloqueio. Após este período, a Dequadra reserva-se o direito de excluir dados de contas inativas.',
             ),
 
-            const SizedBox(height: 24),
-            Text('3. Duração e Expiração da Licença', style: textTheme.titleLarge),
-            const Divider(),
-            const Text(
-              '3.1. O acesso ao Software por parte de todos os utilizadores (Administrador e Vendedores) é condicionado pela validade da licença da Instituição.\n\n'
-                  '3.2. Ao atingir a data de expiração, o acesso de todos os utilizadores será automaticamente suspenso. Os dados permanecerão guardados, mas inacessíveis, até à renovação da licença.\n\n'
-                  '3.3. O acesso só será restabelecido após a confirmação do pagamento referente à renovação, com um prazo médio de 1 (um) dia útil para a reativação do sistema.',
+            _TermSection(
+              number: '4',
+              title: 'PROPRIEDADE DOS DADOS',
+              content: 'Todos os dados de clientes, vendas e produtos inseridos no sistema são de propriedade exclusiva da Instituição Contratante (Administrador).\n\n'
+                  '4.1. Vendedores não possuem direito de propriedade sobre a carteira de clientes cadastrada durante o uso da ferramenta corporativa.',
             ),
 
-            const SizedBox(height: 24),
-            Text('4. Propriedade dos Dados', style: textTheme.titleLarge),
-            const Divider(),
-            const Text(
-              '4.1. Todos os dados inseridos no Software, incluindo informações de clientes, produtos e vendas, são de propriedade da Instituição representada pelo Administrador.\n\n'
-                  '4.2. O Vendedor reconhece que os dados de clientes e vendas por ele registados pertencem à Instituição e podem ser acedidos, geridos e transferidos pelo Administrador.',
+            _TermSection(
+              number: '5',
+              title: 'RESPONSABILIDADES E GARANTIAS',
+              content: 'O software é fornecido "como está" (as is).\n\n'
+                  '5.1. A Dequadra não se responsabiliza por:\n'
+                  'a) Falhas de conectividade ou internet do usuário;\n'
+                  'b) Lucros cessantes ou perda de oportunidades de negócios;\n'
+                  'c) Erros operacionais causados por inserção incorreta de dados.',
             ),
 
-            const SizedBox(height: 24),
-            Text('5. Propriedade Intelectual', style: textTheme.titleLarge),
-            const Divider(),
-            const Text(
-              'O Software, incluindo o seu código, design, e marca "Quadra Vendas", é propriedade exclusiva da Dequadra Apps. Estes Termos não lhe concedem quaisquer direitos sobre a nossa propriedade intelectual, exceto a licença de uso limitada.',
+            _TermSection(
+              number: '6',
+              title: 'PROPRIEDADE INTELECTUAL',
+              content: 'É estritamente proibido:\n'
+                  'a) Copiar, modificar ou criar obras derivadas do código-fonte;\n'
+                  'b) Realizar engenharia reversa ou tentar acessar o banco de dados diretamente;\n'
+                  'c) Vender, alugar ou sublicenciar o acesso ao software para terceiros não autorizados.',
             ),
 
-            const SizedBox(height: 24),
-            Text('6. Modificações dos Termos', style: textTheme.titleLarge),
-            const Divider(),
-            const Text(
-              'Reservamo-nos o direito de modificar estes Termos a qualquer momento. Notificaremos sobre alterações significativas. O uso continuado do Software após as alterações constitui a sua aceitação dos novos Termos.',
+            _TermSection(
+              number: '7',
+              title: 'DISPOSIÇÕES GERAIS',
+              content: 'A Dequadra reserva-se o direito de atualizar estes termos periodicamente. O uso contínuo do serviço após as alterações constitui aceitação dos novos termos. O foro eleito para dirimir quaisquer dúvidas é o da Comarca de Pato Branco - PR.',
             ),
+
+            const SizedBox(height: 32),
+
+            // --- RODAPÉ ---
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceVariant.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    "Dúvidas sobre os termos?",
+                    style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  InkWell(
+                    onTap: () {
+                      // Ação de contato
+                    },
+                    child: Text(
+                      "dequadraapps@gmail.com",
+                      style: TextStyle(
+                        color: colorScheme.primary,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _TermSection extends StatelessWidget {
+  final String number;
+  final String title;
+  final String content;
+
+  const _TermSection({
+    required this.number,
+    required this.title,
+    required this.content,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Número da Cláusula
+          Container(
+            width: 28,
+            height: 28,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer,
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              number,
+              style: TextStyle(
+                color: colorScheme.onPrimaryContainer,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          // Texto
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  content,
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.justify,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

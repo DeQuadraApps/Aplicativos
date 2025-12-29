@@ -55,6 +55,11 @@ class AppTheme {
         secondaryColor: AppColorsLight.secondary,
         errorColor: AppColorsLight.error,
       ),
+      appBarTheme: const AppBarTheme(
+        scrolledUnderElevation: 0,
+        surfaceTintColor: AppColorsLight.surface,
+        backgroundColor: AppColorsLight.surface,
+      ),
       // ... outras customizações do tema claro
     );
   }
@@ -84,6 +89,11 @@ class AppTheme {
         primaryColor: AppColorsDark.primary,
         secondaryColor: AppColorsDark.secondary,
         errorColor: AppColorsDark.error,
+      ),
+      appBarTheme: const AppBarTheme(
+        scrolledUnderElevation: 0,
+        surfaceTintColor: AppColorsDark.surface,
+        backgroundColor: AppColorsDark.surface,
       ),
       // ... outras customizações do tema escuro
     );

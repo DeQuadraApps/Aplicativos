@@ -1,15 +1,16 @@
 // lib/pages/admin/report_view_page.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart'; // Importante para a função `compute`
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
+import 'package:quadra_vendas/enums/plan-type.dart';
 import 'package:quadra_vendas/models/client.model.dart';
 import 'package:quadra_vendas/models/sale.model.dart';
 import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/services/pdf-report-service.dart';
-import 'package:pdf/widgets.dart' as pw; // Importar para pw.Font
+import 'package:pdf/widgets.dart' as pw;
 
 class ReportViewPage extends StatefulWidget {
   final String institutionId;
@@ -37,6 +38,8 @@ class _ReportViewPageState extends State<ReportViewPage> {
   String _institutionName = '';
   String _reportTitle = '';
 
+  PlanType _activePlan = PlanType.start;
+
   @override
   void initState() {
     super.initState();
@@ -53,8 +56,15 @@ class _ReportViewPageState extends State<ReportViewPage> {
 
   Future<List<ReportData>> _fetchAndProcessReportData() async {
     List<UserModel> salespeopleToProcess = [];
+
+    // 1. Busca dados da Instituição (Incluindo o PLANO)
     final instDoc = await FirebaseFirestore.instance.collection('institutions').doc(widget.institutionId).get();
-    _institutionName = instDoc.data()?['name'] ?? 'Relatório';
+    final _institutionData = instDoc.data();
+
+    _institutionName = _institutionData?['name'] ?? 'Relatório';
+
+    _activePlan = PlanType.fromString(_institutionData?['plan']);
+    final bool isStartPlan = _activePlan == PlanType.start;
 
     final monthName = _getMonthName(widget.selectedMonth);
     final year = widget.selectedYear;
@@ -84,6 +94,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
     final bool fetchSales = widget.reportType == 'complete' || widget.reportType == 'sales_only';
 
     for (var salesperson in salespeopleToProcess) {
+
       List<Client> clients = [];
       if (fetchClients) {
         final clientsSnapshot = await FirebaseFirestore.instance
@@ -96,6 +107,10 @@ class _ReportViewPageState extends State<ReportViewPage> {
 
       double totalSales = 0;
       String topSellingItem = 'N/A';
+
+      // ✅ NOVO: Mapa para armazenar vendas por cliente
+      Map<String, double> salesByClientMap = {};
+
       if (fetchSales) {
         final salesSnapshot = await FirebaseFirestore.instance
             .collection('institutions').doc(widget.institutionId)
@@ -110,11 +125,19 @@ class _ReportViewPageState extends State<ReportViewPage> {
         grandTotalTemp += totalSales;
 
         Map<String, int> itemCounts = {};
+
         for (var sale in sales) {
+          // ✅ NOVO: Soma valor para o cliente específico neste loop
+          if (sale.clientId.isNotEmpty) {
+            salesByClientMap[sale.clientId] = (salesByClientMap[sale.clientId] ?? 0) + sale.totalAmount;
+          }
+
+          // Contagem de itens mais vendidos
           for (var item in sale.items) {
             itemCounts[item.product.name] = (itemCounts[item.product.name] ?? 0) + item.quantity;
           }
         }
+
         if (itemCounts.isNotEmpty) {
           topSellingItem = itemCounts.entries.reduce((a, b) => a.value > b.value ? a : b).key;
         } else {
@@ -127,15 +150,13 @@ class _ReportViewPageState extends State<ReportViewPage> {
         clients: clients,
         totalSales: totalSales,
         topSellingItem: topSellingItem,
+        clientSalesTotals: salesByClientMap, // ✅ NOVO: Passando o mapa para o model
       ));
     }
 
-    // Usamos setState aqui para garantir que o título e o total sejam atualizados na tela
-    // antes de qualquer outra ação.
     if(mounted) {
       setState(() {
         _grandTotal = grandTotalTemp;
-        // O título já é setado acima, mas garantimos aqui.
         _reportTitle = _reportTitle;
       });
     }
@@ -157,37 +178,33 @@ class _ReportViewPageState extends State<ReportViewPage> {
                   icon: const Icon(Icons.picture_as_pdf),
                   tooltip: 'Exportar para PDF',
                   onPressed: () async {
+                    // Feedback visual
                     showDialog(
                       context: context,
                       barrierDismissible: false,
-                      builder: (BuildContext context) {
-                        return const Dialog(
-                          child: Padding(
-                            padding: EdgeInsets.all(20.0),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircularProgressIndicator(),
-                                SizedBox(width: 20),
-                                Text("Gerando PDF..."),
-                              ],
-                            ),
+                      builder: (context) => const Dialog(
+                        child: Padding(
+                          padding: EdgeInsets.all(20.0),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CircularProgressIndicator(),
+                              SizedBox(width: 20),
+                              Text("Gerando Relatório..."),
+                            ],
                           ),
-                        );
-                      },
+                        ),
+                      ),
                     );
 
                     try {
-                      // =======================================================
-                      // !! MUDANÇA PRINCIPAL AQUI !!
-                      // Usamos `compute` para rodar a função `_generatePdfInBackground`
-                      // em segundo plano, passando os dados necessários.
-                      // =======================================================
+                      // Carregamento de Fontes
                       final fontData = await rootBundle.load("assets/fonts/Roboto-Regular.ttf");
                       final boldFontData = await rootBundle.load("assets/fonts/Roboto-Bold.ttf");
                       final ttf = pw.Font.ttf(fontData);
                       final boldTtf = pw.Font.ttf(boldFontData);
 
+                      // Chamada do Serviço com o Plano Ativo
                       final pdfService = PdfReportService(
                         reportDataList: snapshot.data!,
                         institutionName: _institutionName,
@@ -196,27 +213,25 @@ class _ReportViewPageState extends State<ReportViewPage> {
                         reportType: widget.reportType,
                         font: ttf,
                         boldFont: boldTtf,
+                        activePlan: _activePlan.toString(), // <--- Aqui passamos a variável de decisão
                       );
 
                       final pdfBytes = await pdfService.generatePdf();
 
-                      // 3. Fechamos o diálogo e mostramos o PDF
-                      if (mounted) Navigator.of(context).pop();
+                      if (mounted) Navigator.of(context).pop(); // Fecha Dialog
                       await Printing.layoutPdf(onLayout: (format) async => pdfBytes);
 
                     } catch (e) {
                       if (mounted) Navigator.of(context).pop();
-
                       if(mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text("Ocorreu um erro ao gerar o PDF: $e"), backgroundColor: Colors.red),
+                          SnackBar(content: Text("Erro ao gerar PDF: $e"), backgroundColor: Colors.red),
                         );
                       }
                     }
                   },
                 );
               }
-              // Mostra um ícone de "carregando" enquanto os dados não chegam
               return const Padding(
                 padding: EdgeInsets.all(16.0),
                 child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
@@ -235,7 +250,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
             return Center(child: Text("Erro ao carregar dados: ${snapshot.error}"));
           }
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text("Nenhum dado encontrado para este relatório."));
+            return const Center(child: Text("Nenhum dado encontrado."));
           }
 
           final reportDataList = snapshot.data!;
@@ -245,6 +260,26 @@ class _ReportViewPageState extends State<ReportViewPage> {
           return ListView(
             padding: const EdgeInsets.all(16.0),
             children: [
+              // Aviso visual na tela se for plano básico
+              if (_activePlan == PlanType.start)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 20),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, color: Colors.blue),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          "Dica: Faça upgrade para o plano Performance ou Elite para gerar relatórios em PDF com design profissional e sua logo.",
+                          style: TextStyle(color: Colors.blue.shade900, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
               ...reportDataList.map((data) => _buildReportSection(data, currencyFormatter)).toList(),
               if(showSales) ...[
                 const Divider(thickness: 2),
@@ -267,6 +302,7 @@ class _ReportViewPageState extends State<ReportViewPage> {
     );
   }
 
+  // ... (o método _buildReportSection continua igual ao seu original)
   Widget _buildReportSection(ReportData data, NumberFormat currencyFormatter) {
     final bool showClients = widget.reportType == 'complete' || widget.reportType == 'clients_only';
     final bool showSales = widget.reportType == 'complete' || widget.reportType == 'sales_only';
