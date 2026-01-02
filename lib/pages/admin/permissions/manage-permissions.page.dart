@@ -1,12 +1,56 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:quadra_vendas/enums/plan-type.dart';
+import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
 
-class ManagePermissionsPage extends StatelessWidget {
+class ManagePermissionsPage extends StatefulWidget {
   final String institutionId;
 
   const ManagePermissionsPage({super.key, required this.institutionId});
 
+  @override
+  State<ManagePermissionsPage> createState() => _ManagePermissionsPageState();
+}
+
+class _ManagePermissionsPageState extends State<ManagePermissionsPage> {
+  PlanType _activePlan = PlanType.start;
+  bool _isLoading = true;
+
+  @override
+  initState() {
+    _loadUserPlan();
+    super.initState();
+  }
+
+  Future<void> _loadUserPlan() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      // Se user não tiver institutionId, usa o widget.institutionId ou trata erro
+      final institutionId = userDoc.data()?['institutionId'] ?? widget.institutionId;
+
+      final instDoc = await FirebaseFirestore.instance.collection('institutions').doc(institutionId).get();
+      final instData = instDoc.data();
+
+      final planString = (instData?['plan'] ?? 'start').toString().toLowerCase();
+
+      if (mounted) {
+        setState(() {
+          _activePlan = PlanType.fromString(planString); // Ajuste conforme seu Enum
+          _isLoading = false; // Libera a tela
+        });
+      }
+    } catch (e) {
+      debugPrint("Erro ao carregar plano: $e");
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
   // Configuração centralizada das permissões para reuso
   final List<Map<String, String>> permissionsConfig = const [
     {'key': 'canMarkDelivered', 'label': 'Marcar Venda como Entregue'},
@@ -16,12 +60,39 @@ class ManagePermissionsPage extends StatelessWidget {
     {'key': 'canChangePrice', 'label': 'Alterar Preço na Venda'},
   ];
 
+  Widget _buildLockedScreen() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(color: Colors.grey.shade100, shape: BoxShape.circle),
+              child: Icon(Icons.lock_outline, size: 64, color: Colors.grey.shade400),
+            ),
+            const SizedBox(height: 24),
+            Text("Funcionalidade Premium", style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            const Text("O Gerenciador de Permissões é exclusivo do plano Elite.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 16)),
+            const SizedBox(height: 32),
+            ElevatedButton(
+              onPressed: () => AppSnackBar.showInfo(context, message: "Entre em contato com o suporte."),
+              child: const Text("Fazer Upgrade Agora"),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Permissões'),
-        actions: [
+        actions: _activePlan != PlanType.elite ? null : [
           // BOTÃO DE AÇÃO EM MASSA
           IconButton(
             icon: const Icon(Icons.playlist_add_check),
@@ -30,10 +101,12 @@ class ManagePermissionsPage extends StatelessWidget {
           ),
         ],
       ),
-      body: StreamBuilder<QuerySnapshot>(
+      body: _activePlan != PlanType.elite
+          ? _buildLockedScreen()
+          : StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('users')
-            .where('institutionId', isEqualTo: institutionId)
+            .where('institutionId', isEqualTo: widget.institutionId)
             .where('role', whereIn: ['employee', 'salesperson'])
             .snapshots(),
         builder: (context, snapshot) {
@@ -157,7 +230,7 @@ class ManagePermissionsPage extends StatelessWidget {
       // 1. Buscar todos os vendedores
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
-          .where('institutionId', isEqualTo: institutionId)
+          .where('institutionId', isEqualTo: widget.institutionId)
           .where('role', whereIn: ['employee', 'salesperson'])
           .get();
 

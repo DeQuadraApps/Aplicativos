@@ -112,6 +112,7 @@ class _HomePageContentState extends State<_HomePageContent> {
 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _isOffline = false;
+  bool isNotElitePlan = true;
 
   @override
   void initState() {
@@ -504,6 +505,7 @@ class _HomePageContentState extends State<_HomePageContent> {
     final bool isAdmin = _currentUserData?.role == 'admin';
     final activePlan = PlanType.fromString(_institutionData?['plan']);
     final bool isStartPlan = activePlan == PlanType.start;
+    isNotElitePlan = activePlan != PlanType.elite;
 
     return Scaffold(
       key: _scaffoldKey,
@@ -700,6 +702,7 @@ class _HomePageContentState extends State<_HomePageContent> {
                       _buildAdminDashboard(
                         metrics,
                         isStartPlan,
+                        isNotElitePlan,
                         colorScheme,
                       )
                     else
@@ -1039,6 +1042,7 @@ class _HomePageContentState extends State<_HomePageContent> {
 
   Widget _buildAdminDashboard(HomePageMetrics metrics,
       bool isStartPlan,
+      bool isNotElitePlan,
       ColorScheme colorScheme,) {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1119,7 +1123,7 @@ class _HomePageContentState extends State<_HomePageContent> {
             ),
 
             // CARD FINANCEIRO (Lógica do Plano Start)
-            if (isStartPlan)
+            if (isNotElitePlan)
               DashboardCard(
                 icon: Icons.lock_outline,
                 title: 'Financeiro',
@@ -1160,7 +1164,7 @@ class _HomePageContentState extends State<_HomePageContent> {
                   }
                 },
               ),
-            if (isStartPlan)
+            if (isNotElitePlan)
               DashboardCard(
                 icon: Icons.lock_outline,
                 title: 'Comissões',
@@ -1457,6 +1461,11 @@ class _HomePageContentState extends State<_HomePageContent> {
                   contentPadding: const EdgeInsets.only(left: 32),
                   leading: const Icon(Icons.lock_person_outlined, size: 20),
                   title: const Text('Permissões de Acesso'),
+                  subtitle: isNotElitePlan ? const Text(
+                      "Plano Básico", style: TextStyle(fontSize: 10)) : null,
+                  trailing: isNotElitePlan
+                      ? const Icon(Icons.lock, size: 16)
+                      : null,
                   onTap: () {
                     Navigator.pop(context);
                     if (_institutionId != null) {

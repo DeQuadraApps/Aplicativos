@@ -82,6 +82,7 @@ class _NewSalePageState extends State<NewSalePage> {
   bool get _canChangePrice {
     if (_currentUserData == null) return false;
     if (_currentUserData!.role == 'admin') return true;
+    if (_activePlan != PlanType.elite) return true;
     return _currentUserData!.permissions['canChangePrice'] == true;
   }
 
@@ -289,9 +290,26 @@ class _NewSalePageState extends State<NewSalePage> {
             ),
 
             // BOTÃO FECHAR
-            TextButton(
-              child: const Text('Fechar', style: TextStyle(color: Colors.grey)),
-              onPressed: () => Navigator.of(context).pop(),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Fechar', style: TextStyle(color: Colors.grey)),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.share),
+                  tooltip: 'Compartilhar',
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    Printing.sharePdf(
+                      bytes: pdfBytes,
+                      filename: 'comprovante.pdf',
+                    );
+                  },
+                ),
+              ],
             ),
           ],
         ));

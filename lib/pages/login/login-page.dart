@@ -1,6 +1,7 @@
 // lib/pages/login/login-page.dart
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:quadra_vendas/widgets/animated-snackbar.widget.dart';
@@ -20,6 +21,24 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
 
   bool _isLoading = false;
+
+  @override
+  void initState() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForIosPwa();
+    });
+    super.initState();
+  }
+
+  void _checkForIosPwa() {
+    if (kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (context) => const IosInstallGuide(),
+      );
+    }
+  }
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
@@ -116,6 +135,72 @@ class _LoginPageState extends State<LoginPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class IosInstallGuide extends StatelessWidget {
+  const IosInstallGuide({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.download_rounded, color: Colors.blue),
+              const SizedBox(width: 12),
+              Text(
+                'Instalar App',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context),
+              )
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Text('Para instalar o Quadra Vendas no seu iPhone:'),
+          const SizedBox(height: 16),
+          _buildStep(
+              icon: Icons.ios_share,
+              text: '1. Toque no botão "Compartilhar" do navegador.'
+          ),
+          const SizedBox(height: 12),
+          _buildStep(
+              icon: Icons.add_box_outlined,
+              text: '2. Selecione "Adicionar à Tela de Início".'
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStep({required IconData icon, required String text}) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.grey[200],
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 24, color: Colors.blue),
+        ),
+        const SizedBox(width: 16),
+        Expanded(child: Text(text, style: const TextStyle(fontSize: 16))),
+      ],
     );
   }
 }

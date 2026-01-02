@@ -56,6 +56,7 @@ class _SalesListPageState extends State<SalesListPage> {
   bool get _canDeleteSale {
     if (_currentUserData == null) return false;
     if (_currentUserData!.role == 'admin') return true;
+    if (_activePlan != PlanType.elite) return true;
     return _currentUserData!.permissions['canDeleteSale'] == true;
   }
 
@@ -63,6 +64,7 @@ class _SalesListPageState extends State<SalesListPage> {
   bool get _canMarkDelivered {
     if (_currentUserData == null) return false;
     if (_currentUserData!.role == 'admin') return true;
+    if (_activePlan != PlanType.elite) return true;
     return _currentUserData!.permissions['canMarkDelivered'] == true;
   }
 

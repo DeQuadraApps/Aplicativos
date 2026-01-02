@@ -49,7 +49,7 @@ class SubscriptionService {
   bool get canAccessWhatsappAuto => _myLimits['allow_whatsapp'] ?? false;
 
   bool get canAccessFinancialModule {
-    return ['CONTROL', 'PERFORMANCE', 'ELITE'].contains(currentPlan);
+    return ['ELITE'].contains(currentPlan);
   }
 
   // === REGRAS DE CONSUMO (Lógica de Bloqueio/Aviso) ===

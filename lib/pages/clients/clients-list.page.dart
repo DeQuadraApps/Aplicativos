@@ -3,6 +3,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:quadra_vendas/enums/plan-type.dart';
 import 'package:quadra_vendas/models/client.model.dart';
 import 'package:quadra_vendas/models/user.model.dart';
 import 'package:quadra_vendas/pages/clients/add-edit-client.page.dart';
@@ -20,6 +21,7 @@ class _ClientsListPageState extends State<ClientsListPage> {
   String? _institutionId;
   UserModel? _currentUserData;
   Stream<QuerySnapshot<Map<String, dynamic>>>? _clientsStream;
+  PlanType _activePlan = PlanType.start;
 
   // ESTADOS PARA A PESQUISA
   final TextEditingController _searchController = TextEditingController();
@@ -46,6 +48,7 @@ class _ClientsListPageState extends State<ClientsListPage> {
   bool get _canEditClient {
     if (_currentUserData == null) return false;
     if (_currentUserData!.role == 'admin') return true;
+    if (_activePlan != PlanType.elite) return true;
     return _currentUserData!.permissions['canEditClient'] == true;
   }
 
@@ -53,6 +56,7 @@ class _ClientsListPageState extends State<ClientsListPage> {
   bool get _canDeleteClient {
     if (_currentUserData == null) return false;
     if (_currentUserData!.role == 'admin') return true;
+    if (_activePlan != PlanType.elite) return true;
     return _currentUserData!.permissions['canDeleteClient'] == true;
   }
 
@@ -66,6 +70,9 @@ class _ClientsListPageState extends State<ClientsListPage> {
 
       _currentUserData = UserModel.fromFirestore(userDoc);
       _institutionId = _currentUserData!.institutionId;
+
+      final institution = await FirebaseFirestore.instance.collection('institutions').doc(_institutionId).get();
+      _activePlan = PlanType.fromString(institution.data()?['plan']);
 
       Query<Map<String, dynamic>> query = FirebaseFirestore.instance
           .collection('institutions').doc(_institutionId)

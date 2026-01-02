@@ -80,7 +80,7 @@ class _FinancialPageState extends State<FinancialPage> {
             const SizedBox(height: 24),
             Text("Funcionalidade Premium", style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold), textAlign: TextAlign.center),
             const SizedBox(height: 12),
-            const Text("O controle financeiro é exclusivo dos planos Control e Elite.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 16)),
+            const Text("O controle financeiro é exclusivo do plano Elite.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 16)),
             const SizedBox(height: 32),
             ElevatedButton(
               onPressed: () => AppSnackBar.showInfo(context, message: "Entre em contato com o suporte."),

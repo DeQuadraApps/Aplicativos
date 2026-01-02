@@ -45,7 +45,7 @@ class _CommissionReportPageState extends State<CommissionReportPage> {
     try {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
       final userData = UserModel.fromFirestore(userDoc);
-      _institutionId = userData.institutionId!;
+      _institutionId = userData.institutionId;
       _currentUser = userData;
 
       final instDoc = await FirebaseFirestore.instance.collection('institutions').doc(_institutionId).get();
@@ -188,7 +188,7 @@ class _CommissionReportPageState extends State<CommissionReportPage> {
             const SizedBox(height: 24),
             Text("Funcionalidade Premium", style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold), textAlign: TextAlign.center),
             const SizedBox(height: 12),
-            const Text("O Relatório de Comissões é exclusivo dos planos Control e Elite.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 16)),
+            const Text("O Relatório de Comissões é exclusivo do plano Elite.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 16)),
             const SizedBox(height: 32),
             ElevatedButton(
               onPressed: () => AppSnackBar.showInfo(context, message: "Entre em contato com o suporte."),
@@ -214,7 +214,7 @@ class _CommissionReportPageState extends State<CommissionReportPage> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _activePlan == PlanType.start
+          : _activePlan != PlanType.elite
           ? _buildLockedScreen()
           : Column(
         children: [
